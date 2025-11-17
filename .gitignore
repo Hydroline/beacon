@@ -1,0 +1,23 @@
+# Build / Gradle
+.gradle/
+build/
+out/
+bin/
+
+# IntelliJ / Android Studio
+.idea/
+*.iml
+
+# VSCode
+.vscode/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Maven (if used)
+target/
+.mvn/wrapper/
