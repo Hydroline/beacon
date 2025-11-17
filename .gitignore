@@ -24,3 +24,7 @@ target/
 
 # Examples
 examples/
+
+# Node / tests
+tests/node_modules/
+tests/pnpm-lock.yaml
