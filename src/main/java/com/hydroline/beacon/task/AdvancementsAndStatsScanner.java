@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.hydroline.beacon.BeaconPlugin;
 import com.hydroline.beacon.storage.DatabaseManager;
+import com.hydroline.beacon.util.PathUtils;
 import com.hydroline.beacon.world.WorldFileAccess;
 import org.bukkit.World;
 
@@ -88,7 +89,7 @@ public class AdvancementsAndStatsScanner {
 
     private int processPlayerFile(Connection connection, World world, String fileType, File file) {
         long lastModified = file.lastModified();
-        String absolutePath = file.getAbsolutePath();
+        String absolutePath = PathUtils.toServerRelativePath(plugin, file);
 
         try {
             if (!shouldProcessFile(connection, fileType, absolutePath, lastModified)) {

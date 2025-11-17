@@ -1,5 +1,6 @@
 plugins {
     id 'java'
+    id 'com.github.johnrengelman.shadow' version '8.1.1'
 }
 
 group = 'com.hydroline'
@@ -8,6 +9,15 @@ version = '0.1.0'
 java {
     toolchain {
         languageVersion = JavaLanguageVersion.of(8)
+    }
+}
+
+// Ensure Shadow's ASM supports parsing newer class versions (e.g., MRJ entries)
+configurations.all {
+    resolutionStrategy {
+        force 'org.ow2.asm:asm:9.7',
+              'org.ow2.asm:asm-tree:9.7',
+              'org.ow2.asm:asm-commons:9.7'
     }
 }
 
@@ -28,6 +38,12 @@ dependencies {
     implementation 'org.apache.commons:commons-csv:1.11.0'
 }
 
-jar {
-    archiveBaseName = 'HydrolineBeacon'
+// Produce a shaded plugin jar with bundled dependencies
+shadowJar {
+    archiveBaseName = 'hydroline-beacon'
+    archiveClassifier = ''
 }
+
+// Make build produce only the shaded jar
+tasks.named('build') { dependsOn tasks.named('shadowJar') }
+tasks.named('jar') { configure { enabled = false } }

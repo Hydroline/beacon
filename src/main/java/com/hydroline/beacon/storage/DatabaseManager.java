@@ -21,13 +21,15 @@ public class DatabaseManager {
             dataFolder.mkdirs();
         }
         File dbFile = new File(dataFolder, "hydroline_beacon.db");
-        this.jdbcUrl = "jdbc:sqlite:" + dbFile.getAbsolutePath();
+        // Add busy_timeout to reduce SQLITE_BUSY under concurrent writers
+        this.jdbcUrl = "jdbc:sqlite:" + dbFile.getAbsolutePath() + "?busy_timeout=5000";
     }
 
     public void initialize() throws SQLException {
         try (Connection connection = getConnection()) {
             try (Statement statement = connection.createStatement()) {
                 statement.executeUpdate("PRAGMA journal_mode=WAL");
+                statement.executeUpdate("PRAGMA busy_timeout=5000");
             }
             createSchema(connection);
         }

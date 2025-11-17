@@ -63,12 +63,16 @@ public class SocketServerManager {
                         sendError(ackSender, "INVALID_KEY");
                         return;
                     }
+                    // Ack immediately to avoid cross-thread ack issues
+                    Map<String, Object> accepted = new HashMap<>();
+                    accepted.put("success", true);
+                    accepted.put("queued", true);
+                    ackSender.sendAckData(accepted);
+
+                    // Then perform heavy work asynchronously
                     Bukkit.getScheduler().runTaskAsynchronously(plugin, () -> {
                         new AdvancementsAndStatsScanner(plugin).scanOnce();
                         new MtrLogsScanner(plugin).scanOnce();
-                        Map<String, Object> resp = new HashMap<>();
-                        resp.put("success", true);
-                        ackSender.sendAckData(resp);
                     });
                 });
 
@@ -78,19 +82,17 @@ public class SocketServerManager {
                         sendError(ackSender, "INVALID_KEY");
                         return;
                     }
-                    Bukkit.getScheduler().runTaskAsynchronously(plugin, () -> {
-                        Map<String, Object> resp = new HashMap<>();
-                        try {
-                            Map<String, String> advancements =
-                                    loadAdvancementsForPlayer(data.getPlayerUuid());
-                            resp.put("success", true);
-                            resp.put("player_uuid", data.getPlayerUuid());
-                            resp.put("advancements", advancements);
-                            ackSender.sendAckData(resp);
-                        } catch (SQLException e) {
-                            sendError(ackSender, "DB_ERROR: " + e.getMessage());
-                        }
-                    });
+                    Map<String, Object> resp = new HashMap<>();
+                    try {
+                        Map<String, String> advancements =
+                                loadAdvancementsForPlayer(data.getPlayerUuid());
+                        resp.put("success", true);
+                        resp.put("player_uuid", data.getPlayerUuid());
+                        resp.put("advancements", advancements);
+                        ackSender.sendAckData(resp);
+                    } catch (SQLException e) {
+                        sendError(ackSender, "DB_ERROR: " + e.getMessage());
+                    }
                 });
 
         server.addEventListener("get_player_stats", PlayerUuidRequest.class,
@@ -99,19 +101,17 @@ public class SocketServerManager {
                         sendError(ackSender, "INVALID_KEY");
                         return;
                     }
-                    Bukkit.getScheduler().runTaskAsynchronously(plugin, () -> {
-                        Map<String, Object> resp = new HashMap<>();
-                        try {
-                            Map<String, Long> stats =
-                                    loadStatsForPlayer(data.getPlayerUuid());
-                            resp.put("success", true);
-                            resp.put("player_uuid", data.getPlayerUuid());
-                            resp.put("stats", stats);
-                            ackSender.sendAckData(resp);
-                        } catch (SQLException e) {
-                            sendError(ackSender, "DB_ERROR: " + e.getMessage());
-                        }
-                    });
+                    Map<String, Object> resp = new HashMap<>();
+                    try {
+                        Map<String, Long> stats =
+                                loadStatsForPlayer(data.getPlayerUuid());
+                        resp.put("success", true);
+                        resp.put("player_uuid", data.getPlayerUuid());
+                        resp.put("stats", stats);
+                        ackSender.sendAckData(resp);
+                    } catch (SQLException e) {
+                        sendError(ackSender, "DB_ERROR: " + e.getMessage());
+                    }
                 });
 
         server.addEventListener("list_online_players", AuthOnlyRequest.class,
@@ -120,19 +120,17 @@ public class SocketServerManager {
                         sendError(ackSender, "INVALID_KEY");
                         return;
                     }
-                    Bukkit.getScheduler().runTaskAsynchronously(plugin, () -> {
+                    try {
                         Future<List<Map<String, Object>>> future =
                                 Bukkit.getScheduler().callSyncMethod(plugin, this::collectOnlinePlayers);
-                        try {
-                            List<Map<String, Object>> players = future.get();
-                            Map<String, Object> resp = new HashMap<>();
-                            resp.put("success", true);
-                            resp.put("players", players);
-                            ackSender.sendAckData(resp);
-                        } catch (InterruptedException | ExecutionException e) {
-                            sendError(ackSender, "INTERNAL_ERROR: " + e.getMessage());
-                        }
-                    });
+                        List<Map<String, Object>> players = future.get();
+                        Map<String, Object> resp = new HashMap<>();
+                        resp.put("success", true);
+                        resp.put("players", players);
+                        ackSender.sendAckData(resp);
+                    } catch (InterruptedException | ExecutionException e) {
+                        sendError(ackSender, "INTERNAL_ERROR: " + e.getMessage());
+                    }
                 });
 
         server.addEventListener("get_server_time", AuthOnlyRequest.class,
@@ -141,19 +139,17 @@ public class SocketServerManager {
                         sendError(ackSender, "INVALID_KEY");
                         return;
                     }
-                    Bukkit.getScheduler().runTaskAsynchronously(plugin, () -> {
+                    try {
                         Future<Map<String, Object>> future =
                                 Bukkit.getScheduler().callSyncMethod(plugin, this::collectServerTime);
-                        try {
-                            Map<String, Object> info = future.get();
-                            Map<String, Object> resp = new HashMap<>();
-                            resp.put("success", true);
-                            resp.putAll(info);
-                            ackSender.sendAckData(resp);
-                        } catch (InterruptedException | ExecutionException e) {
-                            sendError(ackSender, "INTERNAL_ERROR: " + e.getMessage());
-                        }
-                    });
+                        Map<String, Object> info = future.get();
+                        Map<String, Object> resp = new HashMap<>();
+                        resp.put("success", true);
+                        resp.putAll(info);
+                        ackSender.sendAckData(resp);
+                    } catch (InterruptedException | ExecutionException e) {
+                        sendError(ackSender, "INTERNAL_ERROR: " + e.getMessage());
+                    }
                 });
     }
 

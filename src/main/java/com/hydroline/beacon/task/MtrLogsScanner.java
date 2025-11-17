@@ -3,6 +3,7 @@ package com.hydroline.beacon.task;
 import com.hydroline.beacon.BeaconPlugin;
 import com.hydroline.beacon.storage.DatabaseManager;
 import com.hydroline.beacon.world.WorldFileAccess;
+import com.hydroline.beacon.util.PathUtils;
 import org.apache.commons.csv.CSVFormat;
 import org.apache.commons.csv.CSVParser;
 import org.apache.commons.csv.CSVRecord;
@@ -118,7 +119,7 @@ public class MtrLogsScanner {
 
     private int processCsvFile(Connection connection, File file, String context) {
         long lastModified = file.lastModified();
-        String path = file.getAbsolutePath();
+        String path = PathUtils.toServerRelativePath(plugin, file);
 
         try {
             if (!shouldProcessFile(connection, path, lastModified)) {

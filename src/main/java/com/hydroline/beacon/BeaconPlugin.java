@@ -26,7 +26,7 @@ public class BeaconPlugin extends JavaPlugin {
         this.configManager.load();
 
         PluginConfig cfg = configManager.getCurrentConfig();
-        getLogger().info("HydrolineBeacon enabled with port=" + cfg.getPort()
+        getLogger().info("Hydroline Beacon enabled with port=" + cfg.getPort()
                 + ", interval_time_ticks=" + cfg.getIntervalTimeTicks()
                 + ", version=" + cfg.getVersion());
 
@@ -59,7 +59,7 @@ public class BeaconPlugin extends JavaPlugin {
         if (this.socketServerManager != null) {
             this.socketServerManager.stop();
         }
-        getLogger().info("HydrolineBeacon disabled!");
+        getLogger().info("Hydroline Beacon disabled!");
     }
 
     public ConfigManager getConfigManager() {

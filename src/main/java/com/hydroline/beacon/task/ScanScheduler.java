@@ -30,7 +30,7 @@ public class ScanScheduler {
         mtrLogsTask = Bukkit.getScheduler()
                 .runTaskTimerAsynchronously(plugin, () -> {
                     new MtrLogsScanner(plugin).scanOnce();
-                }, interval, interval);
+                }, interval / 2, interval);
     }
 
     public void stop() {
