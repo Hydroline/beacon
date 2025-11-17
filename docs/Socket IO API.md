@@ -46,11 +46,11 @@
 
 2. get_player_advancements
 
-- 描述：获取指定玩家的所有 Advancement 条目（来自 `player_advancements` 表）。
+- 描述：获取指定玩家的所有 Advancement 条目（来自 `player_advancements` 表）。支持通过 `playerUuid` 或 `playerName` 查询（两者至少给一个，`playerUuid` 优先）。
 - 请求：
 
 ```json
-{ "key": "<key>", "playerUuid": "<uuid>" }
+{ "key": "<key>", "playerUuid": "<uuid>", "playerName": "<name>" }
 ```
 
 - ACK 成功示例：
@@ -72,11 +72,11 @@
 
 3. get_player_stats
 
-- 描述：获取指定玩家的所有 stats 条目（来自 `player_stats` 表）。
+- 描述：获取指定玩家的所有 stats 条目（来自 `player_stats` 表）。支持 `playerUuid` 或 `playerName`。
 - 请求：
 
 ```json
-{ "key": "<key>", "playerUuid": "<uuid>" }
+{ "key": "<key>", "playerUuid": "<uuid>", "playerName": "<name>" }
 ```
 
 - ACK 成功示例：
@@ -148,6 +148,7 @@
 {
   "key": "<key>",
   "playerUuid": "<uuid>",
+  "playerName": "<name>",
   "singleDate": "2025-02-13",
   "startDate": "2025-02-01",
   "endDate": "2025-02-29",
@@ -220,6 +221,7 @@
 {
   "key": "<key>",
   "playerUuid": "<uuid>",
+  "playerName": "<name>",
   "eventType": "JOIN|QUIT",
   "singleDate": "2025-11-18", // 与 startDate/endDate 互斥
   "startDate": "2025-11-01", // 与 singleDate 互斥
@@ -233,8 +235,10 @@
 
 - 约束与说明：
   - `singleDate` 与 `startDate/endDate` 互斥；`startDate/endDate` 与 `startAt/endAt` 也互斥。
-  - 日期型参数按服务器本地时区换算为毫秒范围。
-  - `eventType` 仅接受 `JOIN` 或 `QUIT`（大小写不敏感）。
+
+9. get_status（心跳/状态）
+
+- `eventType` 仅接受 `JOIN` 或 `QUIT`（大小写不敏感）。
 - ACK 成功示例：
 
 ```json
@@ -254,6 +258,12 @@
       "world_name": "world",
       "dimension_key": "NORMAL",
       "x": -12.3,
+      "y": 64.0,
+      "z": 88.9
+    }
+  ]
+}
+```
 
 9. get_status（心跳/状态）
 
@@ -278,12 +288,38 @@
   - `interval_time_ticks` 来自插件配置（1 秒 = 20 tick）；并同时提供换算的 `interval_time_seconds`。
   - `server_max_players` 为服务器最大人数容量；`online_player_count` 为当前在线玩家数。
   - 三个累计值来源于 SQLite 数据库：`mtr_logs`、`player_stats`、`player_advancements` 的总行数（非去重玩家数）。
-      "y": 64.0,
-      "z": 88.9
-    }
-  ]
+
+10. get_player_nbt（玩家 NBT 原始体）
+
+- 描述：按玩家返回 `playerdata/*.dat` 的 NBT 原始数据（已转换为 JSON 对象），并在 SQLite 内缓存 X 分钟。
+- 请求：
+
+```json
+{ "key": "<key>", "playerUuid": "<uuid>", "playerName": "<name>" }
+```
+
+- ACK 成功示例：
+
+```json
+{
+  "success": true,
+  "player_uuid": "<uuid>",
+  "nbt": {
+    "bukkit": { "lastKnownName": "Steve" },
+    "Pos": [0.0, 64.0, 0.0],
+    "Health": 20.0,
+    "Inventory": [
+      /* ... */
+    ]
+  }
 }
 ```
+
+- 说明：
+  - 缓存时长由 `config.yml` 的 `nbt_cache_ttl_minutes` 控制（默认 10）。超时后首次查询会自动重载并刷新缓存。
+  - 若找不到对应的 `playerdata/<uuid>.dat` 文件，返回 `success: true, nbt: null`（不视为错误）。
+  - 插件会从 NBT 的 `bukkit.lastKnownName` 自动更新 `player_identities` 表，实现 UUID 与玩家名的对应。
+    });
 
 ## 错误与状态碼
 
@@ -315,7 +351,6 @@ const io = require("socket.io-client");
 const socket = io("http://127.0.0.1:48080", {
   transports: ["websocket"],
   timeout: 10000,
-});
 socket.emit("get_server_time", { key: process.env.BEACON_KEY }, (resp) => {
   if (!resp) return console.error("empty ack");
   if (!resp.success) return console.error("err", resp.error);

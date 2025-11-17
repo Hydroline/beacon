@@ -75,7 +75,7 @@ public class SocketServerManager {
                     });
                 });
 
-        server.addEventListener("get_player_advancements", PlayerUuidRequest.class,
+        server.addEventListener("get_player_advancements", PlayerIdentityRequest.class,
                 (client, data, ackSender) -> {
                     if (!validateKey(data.getKey())) {
                         sendError(ackSender, "INVALID_KEY");
@@ -83,10 +83,11 @@ public class SocketServerManager {
                     }
                     Map<String, Object> resp = new HashMap<>();
                     try {
-                        Map<String, String> advancements =
-                                loadAdvancementsForPlayer(data.getPlayerUuid());
+                        String uuid = ensurePlayerUuid(data.getPlayerUuid(), data.getPlayerName());
+                        if (uuid == null) { sendError(ackSender, "NOT_FOUND"); return; }
+                        Map<String, String> advancements = loadAdvancementsForPlayer(uuid);
                         resp.put("success", true);
-                        resp.put("player_uuid", data.getPlayerUuid());
+                        resp.put("player_uuid", uuid);
                         resp.put("advancements", advancements);
                         ackSender.sendAckData(resp);
                     } catch (SQLException e) {
@@ -94,7 +95,7 @@ public class SocketServerManager {
                     }
                 });
 
-        server.addEventListener("get_player_stats", PlayerUuidRequest.class,
+        server.addEventListener("get_player_stats", PlayerIdentityRequest.class,
                 (client, data, ackSender) -> {
                     if (!validateKey(data.getKey())) {
                         sendError(ackSender, "INVALID_KEY");
@@ -102,10 +103,11 @@ public class SocketServerManager {
                     }
                     Map<String, Object> resp = new HashMap<>();
                     try {
-                        Map<String, Long> stats =
-                                loadStatsForPlayer(data.getPlayerUuid());
+                        String uuid = ensurePlayerUuid(data.getPlayerUuid(), data.getPlayerName());
+                        if (uuid == null) { sendError(ackSender, "NOT_FOUND"); return; }
+                        Map<String, Long> stats = loadStatsForPlayer(uuid);
                         resp.put("success", true);
-                        resp.put("player_uuid", data.getPlayerUuid());
+                        resp.put("player_uuid", uuid);
                         resp.put("stats", stats);
                         ackSender.sendAckData(resp);
                     } catch (SQLException e) {
@@ -159,8 +161,13 @@ public class SocketServerManager {
                         return;
                     }
                     try {
+                        String uuid = data.getPlayerUuid();
+                        if ((uuid == null || uuid.isEmpty()) && data.getPlayerName() != null && !data.getPlayerName().isEmpty()) {
+                            uuid = resolveUuidByName(data.getPlayerName());
+                            if (uuid == null) { sendError(ackSender, "NOT_FOUND"); return; }
+                        }
                         Map<String, Object> result = loadMtrLogs(
-                                data.getPlayerUuid(),
+                                uuid,
                                 data.getSingleDate(),
                                 data.getStartDate(),
                                 data.getEndDate(),
@@ -213,8 +220,13 @@ public class SocketServerManager {
                         return;
                     }
                     try {
+                        String uuid = data.getPlayerUuid();
+                        if ((uuid == null || uuid.isEmpty()) && data.getPlayerName() != null && !data.getPlayerName().isEmpty()) {
+                            uuid = resolveUuidByName(data.getPlayerName());
+                            if (uuid == null) { sendError(ackSender, "NOT_FOUND"); return; }
+                        }
                         Map<String, Object> result = loadPlayerSessions(
-                                data.getPlayerUuid(),
+                                uuid,
                                 data.getEventType(),
                                 data.getSingleDate(),
                                 data.getStartDate(),
@@ -230,6 +242,26 @@ public class SocketServerManager {
                         sendError(ackSender, "DB_ERROR: " + e.getMessage());
                     } catch (IllegalArgumentException e) {
                         sendError(ackSender, "INVALID_ARGUMENT: " + e.getMessage());
+                    }
+                });
+
+        // get_player_nbt: return raw NBT as JSON (cached in SQLite for X minutes)
+        server.addEventListener("get_player_nbt", PlayerIdentityRequest.class,
+                (client, data, ackSender) -> {
+                    if (!validateKey(data.getKey())) { sendError(ackSender, "INVALID_KEY"); return; }
+                    try {
+                        String uuid = ensurePlayerUuid(data.getPlayerUuid(), data.getPlayerName());
+                        if (uuid == null) { sendError(ackSender, "NOT_FOUND"); return; }
+                        Map<String, Object> resp = new HashMap<>();
+                        String json = getPlayerNbtJsonCached(uuid);
+                        resp.put("success", true);
+                        resp.put("player_uuid", uuid);
+                        resp.put("nbt", json != null ? com.fasterxml.jackson.databind.json.JsonMapper.builder().build().readTree(json) : null);
+                        ackSender.sendAckData(resp);
+                    } catch (SQLException e) {
+                        sendError(ackSender, "DB_ERROR: " + e.getMessage());
+                    } catch (Exception e) {
+                        sendError(ackSender, "INTERNAL_ERROR: " + e.getMessage());
                     }
                 });
 
@@ -637,6 +669,86 @@ public class SocketServerManager {
         return totals;
     }
 
+    private String ensurePlayerUuid(String playerUuid, String playerName) throws SQLException {
+        if (playerUuid != null && !playerUuid.isEmpty()) return playerUuid;
+        if (playerName != null && !playerName.isEmpty()) return resolveUuidByName(playerName);
+        return null;
+    }
+
+    private String resolveUuidByName(String playerName) throws SQLException {
+        try (Connection conn = plugin.getDatabaseManager().getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                     "SELECT player_uuid FROM player_identities WHERE player_name = ? ORDER BY last_updated DESC LIMIT 1")) {
+            ps.setString(1, playerName);
+            try (ResultSet rs = ps.executeQuery()) {
+                if (rs.next()) return rs.getString(1);
+            }
+        }
+        return null;
+    }
+
+    private String getPlayerNbtJsonCached(String playerUuid) throws Exception {
+        long now = System.currentTimeMillis();
+        long ttlMillis = plugin.getConfigManager().getCurrentConfig().getNbtCacheTtlMinutes() * 60_000L;
+        try (Connection conn = plugin.getDatabaseManager().getConnection()) {
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "SELECT raw_json, cached_at FROM player_nbt_cache WHERE player_uuid = ?")) {
+                ps.setString(1, playerUuid);
+                try (ResultSet rs = ps.executeQuery()) {
+                    if (rs.next()) {
+                        String json = rs.getString(1);
+                        long cachedAt = rs.getLong(2);
+                        if (cachedAt + ttlMillis > now) {
+                            return json;
+                        }
+                    }
+                }
+            }
+            // Not cached or expired -> try to load from playerdata
+            java.io.File dat = findPlayerDatFile(playerUuid);
+            if (dat == null || !dat.isFile()) return null;
+            Map<String, Object> map;
+            try (java.io.FileInputStream in = new java.io.FileInputStream(dat)) {
+                map = com.hydroline.beacon.util.NbtUtils.readPlayerDatToMap(in);
+            }
+            String json = com.hydroline.beacon.util.NbtUtils.toJson(map);
+            try (PreparedStatement ups = conn.prepareStatement(
+                    "INSERT INTO player_nbt_cache (player_uuid, raw_json, cached_at) VALUES (?, ?, ?) " +
+                            "ON CONFLICT(player_uuid) DO UPDATE SET raw_json=excluded.raw_json, cached_at=excluded.cached_at")) {
+                ups.setString(1, playerUuid);
+                ups.setString(2, json);
+                ups.setLong(3, now);
+                ups.executeUpdate();
+            }
+            // opportunistically upsert identity if missing name
+            Object bukkit = map.get("bukkit");
+            if (bukkit instanceof Map) {
+                Object lkn = ((Map<?, ?>) bukkit).get("lastKnownName");
+                if (lkn instanceof String) {
+                    try (PreparedStatement upi = conn.prepareStatement(
+                            "INSERT INTO player_identities (player_uuid, player_name, last_updated) VALUES (?, ?, ?) " +
+                                    "ON CONFLICT(player_uuid) DO UPDATE SET player_name=excluded.player_name, last_updated=excluded.last_updated")) {
+                        upi.setString(1, playerUuid);
+                        upi.setString(2, (String) lkn);
+                        upi.setLong(3, now);
+                        upi.executeUpdate();
+                    }
+                }
+            }
+            return json;
+        }
+    }
+
+    private java.io.File findPlayerDatFile(String playerUuid) {
+        com.hydroline.beacon.world.WorldFileAccess wfa = plugin.getWorldFileAccess();
+        if (wfa == null) return null;
+        for (org.bukkit.World w : wfa.getWorlds()) {
+            java.io.File f = new java.io.File(w.getWorldFolder(), "playerdata/" + playerUuid + ".dat");
+            if (f.isFile()) return f;
+        }
+        return null;
+    }
+
     public interface AuthPayload {
         String getKey();
     }
@@ -671,11 +783,12 @@ public class SocketServerManager {
         }
     }
 
-    public static class PlayerUuidRequest implements AuthPayload {
+    public static class PlayerIdentityRequest implements AuthPayload {
         private String key;
         private String playerUuid;
+        private String playerName; // optional
 
-        public PlayerUuidRequest() {
+        public PlayerIdentityRequest() {
         }
 
         public String getKey() {
@@ -693,11 +806,15 @@ public class SocketServerManager {
         public void setPlayerUuid(String playerUuid) {
             this.playerUuid = playerUuid;
         }
+
+        public String getPlayerName() { return playerName; }
+        public void setPlayerName(String playerName) { this.playerName = playerName; }
     }
 
     public static class MtrLogsQueryRequest implements AuthPayload {
         private String key;
         private String playerUuid; // optional
+        private String playerName; // optional
         private String singleDate; // YYYY-MM-DD optional
         private String startDate;  // YYYY-MM-DD optional
         private String endDate;    // YYYY-MM-DD optional
@@ -713,6 +830,8 @@ public class SocketServerManager {
         public void setKey(String key) { this.key = key; }
         public String getPlayerUuid() { return playerUuid; }
         public void setPlayerUuid(String playerUuid) { this.playerUuid = playerUuid; }
+        public String getPlayerName() { return playerName; }
+        public void setPlayerName(String playerName) { this.playerName = playerName; }
         public String getSingleDate() { return singleDate; }
         public void setSingleDate(String singleDate) { this.singleDate = singleDate; }
         public String getStartDate() { return startDate; }
@@ -744,6 +863,7 @@ public class SocketServerManager {
     public static class PlayerSessionsQueryRequest implements AuthPayload {
         private String key;
         private String playerUuid; // optional
+        private String playerName; // optional
         private String eventType;  // optional, JOIN/QUIT
         private String singleDate; // YYYY-MM-DD optional
         private String startDate;  // YYYY-MM-DD optional
@@ -759,6 +879,8 @@ public class SocketServerManager {
         public void setKey(String key) { this.key = key; }
         public String getPlayerUuid() { return playerUuid; }
         public void setPlayerUuid(String playerUuid) { this.playerUuid = playerUuid; }
+        public String getPlayerName() { return playerName; }
+        public void setPlayerName(String playerName) { this.playerName = playerName; }
         public String getEventType() { return eventType; }
         public void setEventType(String eventType) { this.eventType = eventType; }
         public String getSingleDate() { return singleDate; }

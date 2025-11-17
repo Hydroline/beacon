@@ -128,6 +128,24 @@ public class DatabaseManager {
                             "UNIQUE(file_type, file_path)" +
                             ")"
             );
+
+                // Map UUID <-> last known player name (from playerdata NBT or other sources)
+                statement.executeUpdate(
+                    "CREATE TABLE IF NOT EXISTS player_identities (" +
+                        "player_uuid TEXT PRIMARY KEY," +
+                        "player_name TEXT," +
+                        "last_updated INTEGER NOT NULL" +
+                        ")"
+                );
+
+                // Cache of raw player NBT JSON to avoid heavy parsing on every request
+                statement.executeUpdate(
+                    "CREATE TABLE IF NOT EXISTS player_nbt_cache (" +
+                        "player_uuid TEXT PRIMARY KEY," +
+                        "raw_json TEXT NOT NULL," +
+                        "cached_at INTEGER NOT NULL" +
+                        ")"
+                );
         }
     }
 }

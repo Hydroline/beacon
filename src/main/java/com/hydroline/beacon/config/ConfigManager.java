@@ -46,8 +46,14 @@ public class ConfigManager {
             cfg.set("version", version);
         }
 
+        long nbtCacheTtlMinutes = cfg.getLong("nbt_cache_ttl_minutes");
+        if (nbtCacheTtlMinutes <= 0) {
+            nbtCacheTtlMinutes = 10L;
+            cfg.set("nbt_cache_ttl_minutes", nbtCacheTtlMinutes);
+        }
+
         plugin.saveConfig();
-        currentConfig = new PluginConfig(port, key, intervalTicks, version);
+        currentConfig = new PluginConfig(port, key, intervalTicks, version, nbtCacheTtlMinutes);
     }
 
     public PluginConfig getCurrentConfig() {

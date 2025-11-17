@@ -18,6 +18,7 @@ async function main() {
   const port = requireEnv("BEACON_PORT");
   const key = requireEnv("BEACON_KEY");
   const playerUuid = process.env.BEACON_PLAYER_UUID;
+  const playerName = process.env.BEACON_PLAYER_NAME;
   const outDir =
     process.env.OUTPUT_DIR || path.resolve(process.cwd(), "output");
   await prepareOutputDir(outDir);
@@ -59,30 +60,36 @@ async function main() {
       );
       await writeJson(outDir, "online_players.json", onlinePlayers);
 
-      if (playerUuid) {
+      if (playerUuid || playerName) {
         const adv = await emitWithAck(
           socket,
           "get_player_advancements",
-          { key, playerUuid },
+          { key, playerUuid, playerName },
           "get_player_advancements"
         );
         await writeJson(
           outDir,
-          `advancements_${sanitize(playerUuid)}.json`,
+          `advancements_${sanitize(playerUuid || playerName || "unknown")}.json`,
           adv
         );
 
         const stats = await emitWithAck(
           socket,
           "get_player_stats",
-          { key, playerUuid },
+          { key, playerUuid, playerName },
           "get_player_stats"
         );
-        await writeJson(outDir, `stats_${sanitize(playerUuid)}.json`, stats);
-      } else {
-        console.log(
-          "BEACON_PLAYER_UUID not set, skip player-specific queries."
+        await writeJson(outDir, `stats_${sanitize(playerUuid || playerName || "unknown")}.json`, stats);
+
+        const nbt = await emitWithAck(
+          socket,
+          "get_player_nbt",
+          { key, playerUuid, playerName },
+          "get_player_nbt"
         );
+        await writeJson(outDir, `nbt_${sanitize(playerUuid || playerName || "unknown")}.json`, nbt);
+      } else {
+        console.log("BEACON_PLAYER_UUID/BEACON_PLAYER_NAME not set, skip player-specific queries.");
       }
 
       const force = await emitWithAck(
@@ -99,7 +106,8 @@ async function main() {
         "get_player_mtr_logs",
         {
           key,
-          playerUuid,
+          ...(playerUuid ? { playerUuid } : {}),
+          ...(playerName ? { playerName } : {}),
           page: 1,
           pageSize: 20,
         },
@@ -125,7 +133,8 @@ async function main() {
         "get_player_mtr_logs",
         {
           key,
-          playerUuid,
+          ...(playerUuid ? { playerUuid } : {}),
+          ...(playerName ? { playerName } : {}),
           singleDate: today,
           page: 1,
           pageSize: 50,
@@ -142,7 +151,8 @@ async function main() {
         "get_player_mtr_logs",
         {
           key,
-          playerUuid,
+          ...(playerUuid ? { playerUuid } : {}),
+          ...(playerName ? { playerName } : {}),
           startDate,
           endDate,
           page: 1,
@@ -203,13 +213,14 @@ async function main() {
       );
 
       // Player sessions: by player if provided
-      if (playerUuid) {
+      if (playerUuid || playerName) {
         const sessionsByPlayer = await emitWithAck(
           socket,
           "get_player_sessions",
           {
             key,
-            playerUuid,
+            ...(playerUuid ? { playerUuid } : {}),
+            ...(playerName ? { playerName } : {}),
             page: 1,
             pageSize: 100,
           },
@@ -217,7 +228,7 @@ async function main() {
         );
         await writeJson(
           outDir,
-          `player_sessions_${sanitize(playerUuid)}.json`,
+          `player_sessions_${sanitize(playerUuid || playerName || "unknown")}.json`,
           sessionsByPlayer
         );
       }

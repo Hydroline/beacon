@@ -1,5 +1,7 @@
 port: 48080
 key: ""
 interval_time: 200
+# NBT 缓存时间（分钟），用于 get_player_nbt 的 JSON 缓存
+nbt_cache_ttl_minutes: 10
 version: 1
 
