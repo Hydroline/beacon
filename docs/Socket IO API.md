@@ -13,6 +13,18 @@
 - 所有响应均为单个 JSON 对象；若错误则 `success: false` 并包含 `error` 字段。成功时 `success: true` 并包含事件相关数据。
 - ACK 语义：服务端使用单次 ACK（v1/v2 语义），客户端回调会收到该 Map 作为唯一参数（非 error-first）。建议客户端为每次 emit 设置超时（推荐 8-10 秒）。
 
+## 配置与调度说明（重要）
+
+- 配置文件：`plugins/Hydroline-Beacon/config.yml`（源码位于 `src/main/resources/config.yml`）。
+- `interval_time`：单位为 tick（1 秒 = 20 tick）。默认值 `200` 表示 10 秒。
+- 周期任务：插件内部有两类周期扫描任务（Advancements/Stats 与 MTR Logs）。两者以相同周期运行，但默认“半周期错峰”调度：
+  - Advancements/Stats：初始延迟 = `interval_time`，周期 = `interval_time`。
+  - MTR Logs：初始延迟 = `interval_time / 2`，周期 = `interval_time`。
+- 现象说明：在默认错峰下，你会看到“每 5 秒出现一条扫描日志（两类任务交替）”，但同一类任务的实际周期仍是 `interval_time`（例如 200 tick = 10 秒）。
+- 调整建议：
+  - 想减少总日志频率为“每 `interval_time` 才有一条”：可将 MTR 任务的初始延迟改为与另一任务一致（需要修改源码 `ScanScheduler`）。
+  - 想让任务更快或更慢：直接改 `interval_time`；记得将秒换算成 tick（秒 × 20）。
+
 ## 全事件清单（详尽说明）
 
 1. force_update
@@ -125,6 +137,7 @@
 ```
 
 - 说明：`do_daylight_cycle` 为字符串（"true" / "false"）；`time` / `full_time` 为 long。
+  - 若服务器当前没有可用世界（极少数边界场景），将返回 `world: null, time: null, full_time: null, do_daylight_cycle: null`。
 
 6. get_player_mtr_logs
 
@@ -253,6 +266,7 @@
 - INVALID_KEY：密钥校验失败（客户端应立即停止并报告凭证问题）。
 - DB_ERROR: <detail>：数据库访问时发生错误（一般为 SQLite 读写/锁或 SQL 异常）。
 - INTERNAL_ERROR: <detail>：内部执行错误（如线程/调度异常）。
+- INVALID_ARGUMENT: <detail>：请求参数非法或互斥条件冲突（例如同时提供 `singleDate` 与 `startDate/endDate`）。
 - 响应示例：
 
 ```json
@@ -302,6 +316,7 @@ sio.emit('get_server_time', {'key': '...'}, callback=ack)
 - `list_online_players`：建议 ≥2-5s。
 - 玩家級的 `get_player_advancements` / `get_player_stats`：建议 ≥30s，且仅在需要时调用。
 - `force_update`：仅管理员或 CI/运维触发，避免短时间內多次调用（建议最少 60s 間隔）。
+- 周期扫描：默认 `interval_time: 200 tick`（约 10 秒），两类扫描半周期交错执行，因此总体日志显示约每 5 秒一条；请按实际机器负载与数据规模调整。
 - 建议客户端实现指数退避重试；對 `INVALID_KEY` 不重试，而是报警並人工干预。
 
 ## 安全建议
