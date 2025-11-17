@@ -254,6 +254,30 @@
       "world_name": "world",
       "dimension_key": "NORMAL",
       "x": -12.3,
+
+9. get_status（心跳/状态）
+
+- 描述：返回用于心跳检测的状态快照，包括配置的扫描间隔、服务器人数信息与数据库累计条目数。
+- 请求：`{ "key": "<key>" }`
+- ACK 成功示例：
+
+```json
+{
+  "success": true,
+  "interval_time_ticks": 200,
+  "interval_time_seconds": 10.0,
+  "server_max_players": 20,
+  "online_player_count": 3,
+  "mtr_logs_total": 68967,
+  "stats_total": 120345,
+  "advancements_total": 34567
+}
+```
+
+- 说明：
+  - `interval_time_ticks` 来自插件配置（1 秒 = 20 tick）；并同时提供换算的 `interval_time_seconds`。
+  - `server_max_players` 为服务器最大人数容量；`online_player_count` 为当前在线玩家数。
+  - 三个累计值来源于 SQLite 数据库：`mtr_logs`、`player_stats`、`player_advancements` 的总行数（非去重玩家数）。
       "y": 64.0,
       "z": 88.9
     }

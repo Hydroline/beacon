@@ -44,7 +44,7 @@ public class SocketServerManager {
         server.start();
 
         plugin.getLogger().info("Socket.IO server started on port " + cfg.getPort());
-        plugin.getLogger().info("Socket.IO events registered: force_update, get_player_advancements, get_player_stats, list_online_players, get_server_time, get_player_mtr_logs, get_mtr_log_detail, get_player_sessions");
+        plugin.getLogger().info("Socket.IO events registered: force_update, get_player_advancements, get_player_stats, list_online_players, get_server_time, get_player_mtr_logs, get_mtr_log_detail, get_player_sessions, get_status");
     }
 
     public void stop() {
@@ -232,6 +232,38 @@ public class SocketServerManager {
                         sendError(ackSender, "INVALID_ARGUMENT: " + e.getMessage());
                     }
                 });
+
+        // get_status: heartbeat/status snapshot
+        server.addEventListener("get_status", AuthOnlyRequest.class,
+                (client, data, ackSender) -> {
+                    if (!validateKey(data.getKey())) {
+                        sendError(ackSender, "INVALID_KEY");
+                        return;
+                    }
+                    try {
+                        // Collect Bukkit server basics on main thread
+                        Future<Map<String, Object>> futureBasics =
+                                Bukkit.getScheduler().callSyncMethod(plugin, this::collectServerBasics);
+                        Map<String, Object> basics = futureBasics.get();
+
+                        // Load DB totals
+                        Map<String, Long> totals = loadDataTotals();
+
+                        Map<String, Object> resp = new HashMap<>();
+                        PluginConfig cfg = plugin.getConfigManager().getCurrentConfig();
+                        long ticks = cfg.getIntervalTimeTicks();
+                        resp.put("success", true);
+                        resp.put("interval_time_ticks", ticks);
+                        resp.put("interval_time_seconds", ticks / 20.0);
+                        resp.putAll(basics);
+                        resp.putAll(totals);
+                        ackSender.sendAckData(resp);
+                    } catch (InterruptedException | ExecutionException e) {
+                        sendError(ackSender, "INTERNAL_ERROR: " + e.getMessage());
+                    } catch (SQLException e) {
+                        sendError(ackSender, "DB_ERROR: " + e.getMessage());
+                    }
+                });
     }
 
     private boolean validateKey(String key) {
@@ -323,6 +355,15 @@ public class SocketServerManager {
         result.put("full_time", world.getFullTime());
         String gamerule = world.getGameRuleValue("doDaylightCycle");
         result.put("do_daylight_cycle", gamerule);
+        return result;
+    }
+
+    private Map<String, Object> collectServerBasics() {
+        Map<String, Object> result = new HashMap<>();
+        int maxPlayers = Bukkit.getMaxPlayers();
+        int online = Bukkit.getOnlinePlayers().size();
+        result.put("server_max_players", maxPlayers);
+        result.put("online_player_count", online);
         return result;
     }
 
@@ -572,6 +613,28 @@ public class SocketServerManager {
                 return row;
             }
         }
+    }
+
+    private Map<String, Long> loadDataTotals() throws SQLException {
+        Map<String, Long> totals = new HashMap<>();
+        try (Connection conn = plugin.getDatabaseManager().getConnection()) {
+            try (PreparedStatement ps = conn.prepareStatement("SELECT COUNT(*) FROM mtr_logs")) {
+                try (ResultSet rs = ps.executeQuery()) {
+                    totals.put("mtr_logs_total", rs.next() ? rs.getLong(1) : 0L);
+                }
+            }
+            try (PreparedStatement ps = conn.prepareStatement("SELECT COUNT(*) FROM player_stats")) {
+                try (ResultSet rs = ps.executeQuery()) {
+                    totals.put("stats_total", rs.next() ? rs.getLong(1) : 0L);
+                }
+            }
+            try (PreparedStatement ps = conn.prepareStatement("SELECT COUNT(*) FROM player_advancements")) {
+                try (ResultSet rs = ps.executeQuery()) {
+                    totals.put("advancements_total", rs.next() ? rs.getLong(1) : 0L);
+                }
+            }
+        }
+        return totals;
     }
 
     public interface AuthPayload {
