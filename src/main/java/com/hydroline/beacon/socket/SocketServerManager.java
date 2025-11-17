@@ -2,9 +2,7 @@ package com.hydroline.beacon.socket;
 
 import com.corundumstudio.socketio.AckRequest;
 import com.corundumstudio.socketio.Configuration;
-import com.corundumstudio.socketio.SocketIOClient;
 import com.corundumstudio.socketio.SocketIOServer;
-import com.corundumstudio.socketio.listener.DataListener;
 import com.hydroline.beacon.BeaconPlugin;
 import com.hydroline.beacon.config.PluginConfig;
 import com.hydroline.beacon.task.AdvancementsAndStatsScanner;
@@ -46,6 +44,7 @@ public class SocketServerManager {
         server.start();
 
         plugin.getLogger().info("Socket.IO server started on port " + cfg.getPort());
+        plugin.getLogger().info("Socket.IO events registered: force_update, get_player_advancements, get_player_stats, list_online_players, get_server_time, get_player_mtr_logs, get_mtr_log_detail, get_player_sessions");
     }
 
     public void stop() {
@@ -151,6 +150,88 @@ public class SocketServerManager {
                         sendError(ackSender, "INTERNAL_ERROR: " + e.getMessage());
                     }
                 });
+
+        // get_player_mtr_logs: list MTR logs with optional filters & pagination
+        server.addEventListener("get_player_mtr_logs", MtrLogsQueryRequest.class,
+                (client, data, ackSender) -> {
+                    if (!validateKey(data.getKey())) {
+                        sendError(ackSender, "INVALID_KEY");
+                        return;
+                    }
+                    try {
+                        Map<String, Object> result = loadMtrLogs(
+                                data.getPlayerUuid(),
+                                data.getSingleDate(),
+                                data.getStartDate(),
+                                data.getEndDate(),
+                                data.getDimensionContext(),
+                                data.getEntryId(),
+                                data.getChangeType(),
+                                data.getPage(),
+                                data.getPageSize()
+                        );
+                        result.put("success", true);
+                        ackSender.sendAckData(result);
+                    } catch (SQLException e) {
+                        sendError(ackSender, "DB_ERROR: " + e.getMessage());
+                    } catch (IllegalArgumentException e) {
+                        sendError(ackSender, "INVALID_ARGUMENT: " + e.getMessage());
+                    }
+                });
+
+        // get_mtr_log_detail: fetch single log row by id
+        server.addEventListener("get_mtr_log_detail", MtrLogDetailRequest.class,
+                (client, data, ackSender) -> {
+                    if (!validateKey(data.getKey())) {
+                        sendError(ackSender, "INVALID_KEY");
+                        return;
+                    }
+                    if (data.getId() <= 0) {
+                        sendError(ackSender, "INVALID_ARGUMENT: id must be > 0");
+                        return;
+                    }
+                    try {
+                        Map<String, Object> log = loadMtrLogById(data.getId());
+                        if (log == null) {
+                            sendError(ackSender, "NOT_FOUND");
+                            return;
+                        }
+                        Map<String, Object> resp = new HashMap<>();
+                        resp.put("success", true);
+                        resp.put("log", log);
+                        ackSender.sendAckData(resp);
+                    } catch (SQLException e) {
+                        sendError(ackSender, "DB_ERROR: " + e.getMessage());
+                    }
+                });
+
+        // get_player_sessions: list player JOIN/QUIT sessions with filters & pagination
+        server.addEventListener("get_player_sessions", PlayerSessionsQueryRequest.class,
+                (client, data, ackSender) -> {
+                    if (!validateKey(data.getKey())) {
+                        sendError(ackSender, "INVALID_KEY");
+                        return;
+                    }
+                    try {
+                        Map<String, Object> result = loadPlayerSessions(
+                                data.getPlayerUuid(),
+                                data.getEventType(),
+                                data.getSingleDate(),
+                                data.getStartDate(),
+                                data.getEndDate(),
+                                data.getStartAt(),
+                                data.getEndAt(),
+                                data.getPage(),
+                                data.getPageSize()
+                        );
+                        result.put("success", true);
+                        ackSender.sendAckData(result);
+                    } catch (SQLException e) {
+                        sendError(ackSender, "DB_ERROR: " + e.getMessage());
+                    } catch (IllegalArgumentException e) {
+                        sendError(ackSender, "INVALID_ARGUMENT: " + e.getMessage());
+                    }
+                });
     }
 
     private boolean validateKey(String key) {
@@ -245,6 +326,254 @@ public class SocketServerManager {
         return result;
     }
 
+    private Map<String, Object> loadMtrLogs(String playerUuid,
+                                            String singleDate,
+                                            String startDate,
+                                            String endDate,
+                                            String dimensionContext,
+                                            String entryId,
+                                            String changeType,
+                                            int page,
+                                            int pageSize) throws SQLException {
+        if (page <= 0) page = 1;
+        if (pageSize <= 0) pageSize = 50;
+        if (pageSize > 500) pageSize = 500; // hard cap
+        // Mutually exclusive date parameters check
+        if (singleDate != null && (startDate != null || endDate != null)) {
+            throw new IllegalArgumentException("Provide either singleDate or startDate/endDate, not both");
+        }
+
+        StringBuilder where = new StringBuilder(" WHERE 1=1");
+        List<Object> params = new ArrayList<>();
+        if (playerUuid != null && !playerUuid.isEmpty()) {
+            where.append(" AND player_uuid = ?"); params.add(playerUuid);
+        }
+        if (dimensionContext != null && !dimensionContext.isEmpty()) {
+            where.append(" AND dimension_context = ?"); params.add(dimensionContext);
+        }
+        if (entryId != null && !entryId.isEmpty()) {
+            where.append(" AND entry_id = ?"); params.add(entryId);
+        }
+        if (changeType != null && !changeType.isEmpty()) {
+            where.append(" AND change_type = ?"); params.add(changeType);
+        }
+        if (singleDate != null && !singleDate.isEmpty()) {
+            // Timestamp assumed ISO prefix; use LIKE 'YYYY-MM-DD%'
+            where.append(" AND timestamp LIKE ?"); params.add(singleDate + "%");
+        } else {
+            if (startDate != null && !startDate.isEmpty()) {
+                where.append(" AND timestamp >= ?"); params.add(startDate);
+            }
+            if (endDate != null && !endDate.isEmpty()) {
+                where.append(" AND timestamp <= ?"); params.add(endDate);
+            }
+        }
+
+        Map<String, Object> result = new HashMap<>();
+        try (Connection conn = plugin.getDatabaseManager().getConnection()) {
+            // count
+            try (PreparedStatement cps = conn.prepareStatement("SELECT COUNT(*) FROM mtr_logs" + where)) {
+                for (int i = 0; i < params.size(); i++) {
+                    cps.setObject(i + 1, params.get(i));
+                }
+                try (ResultSet crs = cps.executeQuery()) {
+                    if (crs.next()) {
+                        result.put("total", crs.getLong(1));
+                    } else {
+                        result.put("total", 0L);
+                    }
+                }
+            }
+            long total = (long) result.get("total");
+            int offset = (page - 1) * pageSize;
+            if (offset >= total) {
+                offset = 0; // reset if out of range to still return first page
+                page = 1;
+            }
+            String sql = "SELECT id, timestamp, player_name, player_uuid, class_name, entry_id, entry_name, position, change_type, old_data, new_data, source_file_path, source_line, dimension_context " +
+                    "FROM mtr_logs" + where + " ORDER BY id DESC LIMIT ? OFFSET ?";
+            try (PreparedStatement ps = conn.prepareStatement(sql)) {
+                int idx = 1;
+                for (Object p : params) {
+                    ps.setObject(idx++, p);
+                }
+                ps.setInt(idx++, pageSize);
+                ps.setInt(idx, offset);
+                List<Map<String, Object>> records = new ArrayList<>();
+                try (ResultSet rs = ps.executeQuery()) {
+                    while (rs.next()) {
+                        Map<String, Object> row = new HashMap<>();
+                        row.put("id", rs.getLong("id"));
+                        row.put("timestamp", rs.getString("timestamp"));
+                        row.put("player_name", rs.getString("player_name"));
+                        row.put("player_uuid", rs.getString("player_uuid"));
+                        row.put("class_name", rs.getString("class_name"));
+                        row.put("entry_id", rs.getString("entry_id"));
+                        row.put("entry_name", rs.getString("entry_name"));
+                        row.put("position", rs.getString("position"));
+                        row.put("change_type", rs.getString("change_type"));
+                        row.put("old_data", rs.getString("old_data"));
+                        row.put("new_data", rs.getString("new_data"));
+                        row.put("source_file_path", rs.getString("source_file_path"));
+                        row.put("source_line", rs.getInt("source_line"));
+                        row.put("dimension_context", rs.getString("dimension_context"));
+                        records.add(row);
+                    }
+                }
+                result.put("records", records);
+            }
+        }
+        result.put("page", page);
+        result.put("page_size", pageSize);
+        return result;
+    }
+
+    private Map<String, Object> loadPlayerSessions(String playerUuid,
+                                                   String eventType,
+                                                   String singleDate,
+                                                   String startDate,
+                                                   String endDate,
+                                                   Long startAt,
+                                                   Long endAt,
+                                                   int page,
+                                                   int pageSize) throws SQLException {
+        if (page <= 0) page = 1;
+        if (pageSize <= 0) pageSize = 50;
+        if (pageSize > 500) pageSize = 500;
+
+        if (singleDate != null && (startDate != null || endDate != null)) {
+            throw new IllegalArgumentException("Provide either singleDate or startDate/endDate, not both");
+        }
+        if ((startDate != null || endDate != null) && (startAt != null || endAt != null)) {
+            throw new IllegalArgumentException("Provide either date strings or epoch millis, not both");
+        }
+
+        Long rangeStart = null;
+        Long rangeEnd = null;
+        if (singleDate != null && !singleDate.isEmpty()) {
+            long[] r = computeDayRange(singleDate);
+            rangeStart = r[0];
+            rangeEnd = r[1];
+        } else if (startDate != null || endDate != null) {
+            long[] r = computeRange(startDate, endDate);
+            rangeStart = r[0];
+            rangeEnd = r[1];
+        } else if (startAt != null || endAt != null) {
+            rangeStart = startAt;
+            rangeEnd = endAt;
+        }
+
+        StringBuilder where = new StringBuilder(" WHERE 1=1");
+        List<Object> params = new ArrayList<>();
+        if (playerUuid != null && !playerUuid.isEmpty()) {
+            where.append(" AND player_uuid = ?"); params.add(playerUuid);
+        }
+        if (eventType != null && !eventType.isEmpty()) {
+            // Only allow JOIN or QUIT if provided
+            if (!"JOIN".equalsIgnoreCase(eventType) && !"QUIT".equalsIgnoreCase(eventType)) {
+                throw new IllegalArgumentException("eventType must be JOIN or QUIT");
+            }
+            where.append(" AND event_type = ?"); params.add(eventType.toUpperCase());
+        }
+        if (rangeStart != null) { where.append(" AND occurred_at >= ?"); params.add(rangeStart); }
+        if (rangeEnd != null)   { where.append(" AND occurred_at <= ?"); params.add(rangeEnd); }
+
+        Map<String, Object> result = new HashMap<>();
+        try (Connection conn = plugin.getDatabaseManager().getConnection()) {
+            try (PreparedStatement cps = conn.prepareStatement("SELECT COUNT(*) FROM player_sessions" + where)) {
+                for (int i = 0; i < params.size(); i++) cps.setObject(i + 1, params.get(i));
+                try (ResultSet crs = cps.executeQuery()) {
+                    result.put("total", crs.next() ? crs.getLong(1) : 0L);
+                }
+            }
+            long total = (long) result.get("total");
+            int offset = (page - 1) * pageSize;
+            if (offset >= total) { offset = 0; page = 1; }
+            String sql = "SELECT id, event_type, occurred_at, player_uuid, player_name, player_ip, world_name, dimension_key, x, y, z " +
+                    "FROM player_sessions" + where + " ORDER BY id DESC LIMIT ? OFFSET ?";
+            try (PreparedStatement ps = conn.prepareStatement(sql)) {
+                int idx = 1;
+                for (Object p : params) ps.setObject(idx++, p);
+                ps.setInt(idx++, pageSize);
+                ps.setInt(idx, offset);
+                List<Map<String, Object>> records = new ArrayList<>();
+                try (ResultSet rs = ps.executeQuery()) {
+                    while (rs.next()) {
+                        Map<String, Object> row = new HashMap<>();
+                        row.put("id", rs.getLong("id"));
+                        row.put("event_type", rs.getString("event_type"));
+                        row.put("occurred_at", rs.getLong("occurred_at"));
+                        row.put("player_uuid", rs.getString("player_uuid"));
+                        row.put("player_name", rs.getString("player_name"));
+                        row.put("player_ip", rs.getString("player_ip"));
+                        row.put("world_name", rs.getString("world_name"));
+                        row.put("dimension_key", rs.getString("dimension_key"));
+                        row.put("x", rs.getDouble("x"));
+                        row.put("y", rs.getDouble("y"));
+                        row.put("z", rs.getDouble("z"));
+                        records.add(row);
+                    }
+                }
+                result.put("records", records);
+            }
+        }
+        result.put("page", page);
+        result.put("page_size", pageSize);
+        return result;
+    }
+
+    private long[] computeDayRange(String date) {
+        // date: YYYY-MM-DD
+        java.time.LocalDate d = java.time.LocalDate.parse(date);
+        java.time.ZoneId zone = java.time.ZoneId.systemDefault();
+        long start = d.atStartOfDay(zone).toInstant().toEpochMilli();
+        long end = d.plusDays(1).atStartOfDay(zone).toInstant().toEpochMilli() - 1;
+        return new long[]{start, end};
+    }
+
+    private long[] computeRange(String startDate, String endDate) {
+        java.time.ZoneId zone = java.time.ZoneId.systemDefault();
+        Long start = null;
+        Long end = null;
+        if (startDate != null && !startDate.isEmpty()) {
+            java.time.LocalDate d = java.time.LocalDate.parse(startDate);
+            start = d.atStartOfDay(zone).toInstant().toEpochMilli();
+        }
+        if (endDate != null && !endDate.isEmpty()) {
+            java.time.LocalDate d = java.time.LocalDate.parse(endDate);
+            end = d.plusDays(1).atStartOfDay(zone).toInstant().toEpochMilli() - 1;
+        }
+        return new long[]{start != null ? start : Long.MIN_VALUE, end != null ? end : Long.MAX_VALUE};
+    }
+
+    private Map<String, Object> loadMtrLogById(long id) throws SQLException {
+        try (Connection conn = plugin.getDatabaseManager().getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                     "SELECT id, timestamp, player_name, player_uuid, class_name, entry_id, entry_name, position, change_type, old_data, new_data, source_file_path, source_line, dimension_context " +
+                             "FROM mtr_logs WHERE id = ?")) {
+            ps.setLong(1, id);
+            try (ResultSet rs = ps.executeQuery()) {
+                if (!rs.next()) return null;
+                Map<String, Object> row = new HashMap<>();
+                row.put("id", rs.getLong("id"));
+                row.put("timestamp", rs.getString("timestamp"));
+                row.put("player_name", rs.getString("player_name"));
+                row.put("player_uuid", rs.getString("player_uuid"));
+                row.put("class_name", rs.getString("class_name"));
+                row.put("entry_id", rs.getString("entry_id"));
+                row.put("entry_name", rs.getString("entry_name"));
+                row.put("position", rs.getString("position"));
+                row.put("change_type", rs.getString("change_type"));
+                row.put("old_data", rs.getString("old_data"));
+                row.put("new_data", rs.getString("new_data"));
+                row.put("source_file_path", rs.getString("source_file_path"));
+                row.put("source_line", rs.getInt("source_line"));
+                row.put("dimension_context", rs.getString("dimension_context"));
+                return row;
+            }
+        }
+    }
+
     public interface AuthPayload {
         String getKey();
     }
@@ -301,6 +630,88 @@ public class SocketServerManager {
         public void setPlayerUuid(String playerUuid) {
             this.playerUuid = playerUuid;
         }
+    }
+
+    public static class MtrLogsQueryRequest implements AuthPayload {
+        private String key;
+        private String playerUuid; // optional
+        private String singleDate; // YYYY-MM-DD optional
+        private String startDate;  // YYYY-MM-DD optional
+        private String endDate;    // YYYY-MM-DD optional
+        private String dimensionContext; // optional
+        private String entryId; // optional
+        private String changeType; // optional
+        private int page = 1;
+        private int pageSize = 50;
+
+        public MtrLogsQueryRequest() {}
+
+        public String getKey() { return key; }
+        public void setKey(String key) { this.key = key; }
+        public String getPlayerUuid() { return playerUuid; }
+        public void setPlayerUuid(String playerUuid) { this.playerUuid = playerUuid; }
+        public String getSingleDate() { return singleDate; }
+        public void setSingleDate(String singleDate) { this.singleDate = singleDate; }
+        public String getStartDate() { return startDate; }
+        public void setStartDate(String startDate) { this.startDate = startDate; }
+        public String getEndDate() { return endDate; }
+        public void setEndDate(String endDate) { this.endDate = endDate; }
+        public String getDimensionContext() { return dimensionContext; }
+        public void setDimensionContext(String dimensionContext) { this.dimensionContext = dimensionContext; }
+        public String getEntryId() { return entryId; }
+        public void setEntryId(String entryId) { this.entryId = entryId; }
+        public String getChangeType() { return changeType; }
+        public void setChangeType(String changeType) { this.changeType = changeType; }
+        public int getPage() { return page; }
+        public void setPage(int page) { this.page = page; }
+        public int getPageSize() { return pageSize; }
+        public void setPageSize(int pageSize) { this.pageSize = pageSize; }
+    }
+
+    public static class MtrLogDetailRequest implements AuthPayload {
+        private String key;
+        private long id;
+        public MtrLogDetailRequest() {}
+        public String getKey() { return key; }
+        public void setKey(String key) { this.key = key; }
+        public long getId() { return id; }
+        public void setId(long id) { this.id = id; }
+    }
+
+    public static class PlayerSessionsQueryRequest implements AuthPayload {
+        private String key;
+        private String playerUuid; // optional
+        private String eventType;  // optional, JOIN/QUIT
+        private String singleDate; // YYYY-MM-DD optional
+        private String startDate;  // YYYY-MM-DD optional
+        private String endDate;    // YYYY-MM-DD optional
+        private Long startAt;      // epoch millis optional
+        private Long endAt;        // epoch millis optional
+        private int page = 1;
+        private int pageSize = 50;
+
+        public PlayerSessionsQueryRequest() {}
+
+        public String getKey() { return key; }
+        public void setKey(String key) { this.key = key; }
+        public String getPlayerUuid() { return playerUuid; }
+        public void setPlayerUuid(String playerUuid) { this.playerUuid = playerUuid; }
+        public String getEventType() { return eventType; }
+        public void setEventType(String eventType) { this.eventType = eventType; }
+        public String getSingleDate() { return singleDate; }
+        public void setSingleDate(String singleDate) { this.singleDate = singleDate; }
+        public String getStartDate() { return startDate; }
+        public void setStartDate(String startDate) { this.startDate = startDate; }
+        public String getEndDate() { return endDate; }
+        public void setEndDate(String endDate) { this.endDate = endDate; }
+        public Long getStartAt() { return startAt; }
+        public void setStartAt(Long startAt) { this.startAt = startAt; }
+        public Long getEndAt() { return endAt; }
+        public void setEndAt(Long endAt) { this.endAt = endAt; }
+        public int getPage() { return page; }
+        public void setPage(int page) { this.page = page; }
+        public int getPageSize() { return pageSize; }
+        public void setPageSize(int pageSize) { this.pageSize = pageSize; }
     }
 }
 
