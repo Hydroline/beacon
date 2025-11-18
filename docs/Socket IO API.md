@@ -46,7 +46,7 @@
 
 2. get_player_advancements
 
-- 描述：获取指定玩家的所有 Advancement 条目（来自 `player_advancements` 表）。支持通过 `playerUuid` 或 `playerName` 查询（两者至少给一个，`playerUuid` 优先）。
+- 描述：获取指定玩家的 Advancement 条目（来自 `player_advancements` 表）。支持通过 `playerUuid` 或 `playerName` 查询（两者至少给一个，`playerUuid` 优先），**支持按条目分页**。
 - 请求：
 
 ```json
@@ -54,7 +54,9 @@
   "key": "<key>",
   "playerUuid": "<uuid>",
   "playerName": "<name>",
-  "keys": ["minecraft:story/root", "mod:x_custom_adv"]
+  "keys": ["minecraft:story/root", "mod:x_custom_adv"],
+  "page": 1,
+  "pageSize": 100
 }
 ```
 
@@ -67,18 +69,28 @@
   "advancements": {
     "minecraft:story/root": "{\"done\":true,\"criteria\":{...}}",
     "mod:x_custom_adv": "{...}"
-  }
+  },
+  "total": 234,
+  "page": 1,
+  "page_size": 100
 }
 ```
 
-- 关键说明：
+- 分页与字段说明：
+  - 若未提供 `page` 或 `page <= 0`：按 `page = 1` 处理。
+  - 若未提供 `pageSize` 或 `pageSize <= 0`：按 `pageSize = 100` 处理。
+  - 最大 `pageSize` 为 `1000`，超出将被截断为 `1000`。
+  - 若请求的页超出范围（offset ≥ total），服务端会自动重置为第 1 页返回数据，并在响应中反映最终的 `page` 与 `page_size`。
+  - `total`：在当前过滤条件（`playerUuid/playerName` + 可选 `keys`）下的总条目数。
+  - `advancements`：当前页记录映射，并非所有记录；如需全量可使用足够大的 `pageSize`。
+- 其他关键说明保持不变：
   - `advancements` 的每个 value 是一个 **JSON 字符串**（UTF-8 bytes 存储）。客户端需 `JSON.parse()` 或等效解析。不要假设它已是对象。
   - 键为 Advancement ID，例如 `minecraft:story/root` 或 mod 提供的 ID。
   - 可选 `keys` 数组用于只取关心的条目，若缺失对应键则返回结果中不包含该键。
 
 3. get_player_stats
 
-- 描述：获取指定玩家的所有 stats 条目（来自 `player_stats` 表）。支持 `playerUuid` 或 `playerName`。
+- 描述：获取指定玩家的 stats 条目（来自 `player_stats` 表）。支持 `playerUuid` 或 `playerName`，**支持按条目分页**。
 - 请求：
 
 ```json
@@ -86,7 +98,9 @@
   "key": "<key>",
   "playerUuid": "<uuid>",
   "playerName": "<name>",
-  "keys": ["minecraft:custom:minecraft:jump"]
+  "keys": ["minecraft:custom:minecraft:jump"],
+  "page": 1,
+  "pageSize": 100
 }
 ```
 
@@ -99,11 +113,18 @@
   "stats": {
     "minecraft:mined:stone": 12345,
     "stats:minecraft:broken": 0
-  }
+  },
+  "total": 120345,
+  "page": 1,
+  "page_size": 100
 }
 ```
 
-- 关键说明：
+- 分页与字段说明：
+  - `page` / `pageSize` 与 `get_player_advancements` 完全一致：默认值、上限及超页时自动回退到第一页的行为相同。
+  - `total`：在当前过滤条件（`playerUuid/playerName` + 可选 `keys`）下的总 stats 条目数。
+  - `stats`：当前页的 key→ 数值映射；如需全量可将 `pageSize` 设为较大值（上限 1000）。
+- 其他关键说明保持不变：
   - 存储格式为：`category + ":" + statName`，但实际 category 字段可能本身包含 `:`，因此客户端请按最后一个冒号或按约定拆分（具体拆法由接入方需求决定）。不要对 `stats` key 做过于严格的硬编码解析。
   - value 为整型（long）。
   - 可选 `keys` 数组用于只取关心的条目，缺失的键不会出现在响应里。
