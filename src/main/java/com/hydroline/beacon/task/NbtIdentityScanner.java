@@ -98,7 +98,7 @@ public class NbtIdentityScanner {
         }
 
         long elapsed = System.currentTimeMillis() - started;
-        if (filesProcessed > 0 || upserts > 0) {
+        if (upserts > 0) {
             plugin.getLogger().info("NBT identity scan completed in " + elapsed + " ms, files=" + filesProcessed + ", upserts=" + upserts);
         }
     }

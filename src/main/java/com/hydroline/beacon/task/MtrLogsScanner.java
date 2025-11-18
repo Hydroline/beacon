@@ -89,9 +89,9 @@ public class MtrLogsScanner {
         }
 
         long elapsed = System.currentTimeMillis() - startedAt;
-        if (filesProcessed > 0 || rowsInserted > 0) {
+        if (rowsInserted > 0) {
             plugin.getLogger().info("MTR logs scan completed in " + elapsed + " ms, " +
-                    "files processed=" + filesProcessed + ", rows inserted=" + rowsInserted);
+                "files processed=" + filesProcessed + ", rows inserted=" + rowsInserted);
         }
     }
 

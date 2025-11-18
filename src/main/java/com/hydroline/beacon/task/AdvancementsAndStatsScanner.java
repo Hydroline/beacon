@@ -82,9 +82,9 @@ public class AdvancementsAndStatsScanner {
         }
 
         long elapsed = System.currentTimeMillis() - startedAt;
-        if (filesProcessed > 0 || recordsUpserted > 0) {
+        if (recordsUpserted > 0) {
             plugin.getLogger().info("Advancements/Stats scan completed in " + elapsed + " ms, " +
-                    "files processed=" + filesProcessed + ", records upserted=" + recordsUpserted);
+                "files processed=" + filesProcessed + ", records upserted=" + recordsUpserted);
         }
     }
 
