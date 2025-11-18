@@ -167,6 +167,7 @@
   "dimensionContext": "overworld|the_nether|the_end|...",
   "entryId": "<entry id>",
   "changeType": "ADD|REMOVE|UPDATE",
+  "orderColumn": "timestamp|id",
   "order": "asc|desc",
   "page": 1,
   "pageSize": 50
@@ -176,7 +177,8 @@
 - 约束与说明：
   - `singleDate` 与 `startDate/endDate` 互斥；日期格式为 `YYYY-MM-DD`，服务器按本地时区做整日范围。
   - 若请求页超出范围，会自动重置到第 1 页并返回有效数据。
-  - `order` 默认为 `desc`（按 `id` 倒序），填入 `asc` 可改为正序。
+  - `orderColumn` 可选，允许字段：`timestamp`、`id`；默认 `timestamp`。
+  - `order` 默认为 `desc`，与 `orderColumn` 组合后，默认表现为“最新时间戳在第一页”。如需正序请传 `order: "asc"`。
 - ACK 成功示例：
 
 ```json
@@ -236,7 +238,7 @@
   "key": "<key>",
   "playerUuid": "<uuid>",
   "playerName": "<name>",
-  "eventType": "JOIN|QUIT",
+  "eventType": "JOIN|QUIT|ABNORMAL_QUIT",
   "singleDate": "2025-11-18", // 与 startDate/endDate 互斥
   "startDate": "2025-11-01", // 与 singleDate 互斥
   "endDate": "2025-11-18", // 与 singleDate 互斥
@@ -249,10 +251,11 @@
 
 - 约束与说明：
   - `singleDate` 与 `startDate/endDate` 互斥；`startDate/endDate` 与 `startAt/endAt` 也互斥。
+  - `eventType` 可取：`JOIN`、`QUIT`、`ABNORMAL_QUIT`。其中 `ABNORMAL_QUIT` 表示上次服务器异常中断导致未收到 `PlayerQuitEvent`，在插件“启动完成”或“停服”阶段由后台补偿写入的退出事件（时间戳为补偿时刻）。
 
 9. get_status（心跳/状态）
 
-- `eventType` 仅接受 `JOIN` 或 `QUIT`（大小写不敏感）。
+- `eventType` 大小写不敏感；支持 `JOIN`、`QUIT`、`ABNORMAL_QUIT`。
 - ACK 成功示例：
 
 ```json
@@ -431,7 +434,7 @@ sio.emit('get_server_time', {'key': '...'}, callback=ack)
 - Advancements: Map<advId, rawJsonString>（客户端需要 JSON.parse）。
 - Stats: Map<composedKey, long>，composedKey 为 category 与 statName 用冒号拼接，category 可能包含冒号本身。
 - MTR Logs: 见 `get_player_mtr_logs`/`get_mtr_log_detail` 返回结构；`timestamp` 为文本时间戳（CSV 原样）。
-- Player Sessions: `occurred_at` 为 epoch 毫秒；`event_type` 为 `JOIN`/`QUIT`。
+- Player Sessions: `occurred_at` 为 epoch 毫秒；`event_type` 为 `JOIN`/`QUIT`/`ABNORMAL_QUIT`。
 
 ## 建议的文档变更清单（维护者用）
 

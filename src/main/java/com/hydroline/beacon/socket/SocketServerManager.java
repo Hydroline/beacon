@@ -180,7 +180,8 @@ public class SocketServerManager {
                                 data.getChangeType(),
                                 data.getPage(),
                                 data.getPageSize(),
-                                data.getOrder()
+                                data.getOrder(),
+                                data.getOrderColumn()
                         );
                         result.put("success", true);
                         ackSender.sendAckData(result);
@@ -530,7 +531,8 @@ public class SocketServerManager {
                                             String changeType,
                                             int page,
                                             int pageSize,
-                                            String order) throws SQLException {
+                                            String order,
+                                            String orderColumn) throws SQLException {
         if (page <= 0) page = 1;
         if (pageSize <= 0) pageSize = 50;
         if (pageSize > 500) pageSize = 500; // hard cap
@@ -540,6 +542,7 @@ public class SocketServerManager {
         }
 
         String orderClause = normalizeOrder(order);
+        String orderByColumn = normalizeOrderColumn(orderColumn);
 
         StringBuilder where = new StringBuilder(" WHERE 1=1");
         List<Object> params = new ArrayList<>();
@@ -589,7 +592,7 @@ public class SocketServerManager {
                 page = 1;
             }
                 String sql = "SELECT id, timestamp, player_name, player_uuid, class_name, entry_id, entry_name, position, change_type, old_data, new_data, source_file_path, source_line, dimension_context " +
-                    "FROM mtr_logs" + where + " ORDER BY id " + orderClause + " LIMIT ? OFFSET ?";
+                    "FROM mtr_logs" + where + " ORDER BY " + orderByColumn + " " + orderClause + " LIMIT ? OFFSET ?";
             try (PreparedStatement ps = conn.prepareStatement(sql)) {
                 int idx = 1;
                 for (Object p : params) {
@@ -624,6 +627,21 @@ public class SocketServerManager {
         result.put("page", page);
         result.put("page_size", pageSize);
         return result;
+    }
+
+    private String normalizeOrderColumn(String orderColumn) {
+        if (orderColumn == null || orderColumn.isEmpty()) {
+            return "timestamp"; // default to timestamp
+        }
+        String c = orderColumn.toLowerCase();
+        switch (c) {
+            case "timestamp":
+                return "timestamp";
+            case "id":
+                return "id";
+            default:
+                throw new IllegalArgumentException("orderColumn must be 'timestamp' or 'id'");
+        }
     }
 
     private Map<String, Object> loadPlayerSessions(String playerUuid,
@@ -667,11 +685,12 @@ public class SocketServerManager {
             where.append(" AND player_uuid = ?"); params.add(playerUuid);
         }
         if (eventType != null && !eventType.isEmpty()) {
-            // Only allow JOIN or QUIT if provided
-            if (!"JOIN".equalsIgnoreCase(eventType) && !"QUIT".equalsIgnoreCase(eventType)) {
-                throw new IllegalArgumentException("eventType must be JOIN or QUIT");
+            // Allow JOIN, QUIT, ABNORMAL_QUIT
+            String up = eventType.toUpperCase();
+            if (!"JOIN".equals(up) && !"QUIT".equals(up) && !"ABNORMAL_QUIT".equals(up)) {
+                throw new IllegalArgumentException("eventType must be JOIN, QUIT or ABNORMAL_QUIT");
             }
-            where.append(" AND event_type = ?"); params.add(eventType.toUpperCase());
+            where.append(" AND event_type = ?"); params.add(up);
         }
         if (rangeStart != null) { where.append(" AND occurred_at >= ?"); params.add(rangeStart); }
         if (rangeEnd != null)   { where.append(" AND occurred_at <= ?"); params.add(rangeEnd); }
@@ -1048,6 +1067,7 @@ public class SocketServerManager {
         private int page = 1;
         private int pageSize = 50;
         private String order = "desc";
+        private String orderColumn; // optional: timestamp|id; default timestamp
 
         public MtrLogsQueryRequest() {}
 
@@ -1075,6 +1095,8 @@ public class SocketServerManager {
         public void setPageSize(int pageSize) { this.pageSize = pageSize; }
         public String getOrder() { return order; }
         public void setOrder(String order) { this.order = order; }
+        public String getOrderColumn() { return orderColumn; }
+        public void setOrderColumn(String orderColumn) { this.orderColumn = orderColumn; }
     }
 
     public static class MtrLogDetailRequest implements AuthPayload {
