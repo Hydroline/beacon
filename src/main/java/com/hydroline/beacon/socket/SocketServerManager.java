@@ -407,8 +407,16 @@ public class SocketServerManager {
                         resp.put("player", data.getPlayerName());
                         resp.put("balance", value);
                         ackSender.sendAckData(resp);
-                    } catch (InterruptedException | ExecutionException e) {
-                        sendError(ackSender, "INTERNAL_ERROR: " + e.getMessage());
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                        sendError(ackSender, "INTERNAL_ERROR: interrupted");
+                    } catch (ExecutionException e) {
+                        Throwable cause = e.getCause();
+                        if (cause instanceof IllegalArgumentException) {
+                            sendError(ackSender, "INVALID_ARGUMENT: " + cause.getMessage());
+                        } else {
+                            sendError(ackSender, "INTERNAL_ERROR: " + (cause != null ? cause.getMessage() : e.getMessage()));
+                        }
                     } catch (IllegalArgumentException e) {
                         sendError(ackSender, "INVALID_ARGUMENT: " + e.getMessage());
                     }
@@ -429,8 +437,16 @@ public class SocketServerManager {
                         resp.put("player", data.getPlayerName());
                         resp.put("balance", value);
                         ackSender.sendAckData(resp);
-                    } catch (InterruptedException | ExecutionException e) {
-                        sendError(ackSender, "INTERNAL_ERROR: " + e.getMessage());
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                        sendError(ackSender, "INTERNAL_ERROR: interrupted");
+                    } catch (ExecutionException e) {
+                        Throwable cause = e.getCause();
+                        if (cause instanceof IllegalArgumentException) {
+                            sendError(ackSender, "INVALID_ARGUMENT: " + cause.getMessage());
+                        } else {
+                            sendError(ackSender, "INTERNAL_ERROR: " + (cause != null ? cause.getMessage() : e.getMessage()));
+                        }
                     } catch (IllegalArgumentException e) {
                         sendError(ackSender, "INVALID_ARGUMENT: " + e.getMessage());
                     }
@@ -451,8 +467,16 @@ public class SocketServerManager {
                         resp.put("player", data.getPlayerName());
                         resp.put("balance", value);
                         ackSender.sendAckData(resp);
-                    } catch (InterruptedException | ExecutionException e) {
-                        sendError(ackSender, "INTERNAL_ERROR: " + e.getMessage());
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                        sendError(ackSender, "INTERNAL_ERROR: interrupted");
+                    } catch (ExecutionException e) {
+                        Throwable cause = e.getCause();
+                        if (cause instanceof IllegalArgumentException) {
+                            sendError(ackSender, "INVALID_ARGUMENT: " + cause.getMessage());
+                        } else {
+                            sendError(ackSender, "INTERNAL_ERROR: " + (cause != null ? cause.getMessage() : e.getMessage()));
+                        }
                     } catch (IllegalArgumentException e) {
                         sendError(ackSender, "INVALID_ARGUMENT: " + e.getMessage());
                     }
