@@ -271,6 +271,7 @@
 ```
 
 - 约束与说明：
+
   - `singleDate` 与 `startDate/endDate` 互斥；`startDate/endDate` 与 `startAt/endAt` 也互斥。
   - `eventType` 可取：`JOIN`、`QUIT`、`ABNORMAL_QUIT`。其中 `ABNORMAL_QUIT` 表示上次服务器异常中断导致未收到 `PlayerQuitEvent`，在插件“启动完成”或“停服”阶段由后台补偿写入的退出事件（时间戳为补偿时刻）。
   - `eventType` 大小写不敏感。
@@ -454,6 +455,70 @@
 - 说明：
   - `amount` 可为负数，表示扣减余额；内部会做 int 边界保护，最终写入值不会超过 Java int 范围。
   - 行为等价于：当前值 = 通过 `get_player_balance` 读出；下一值 = 当前值 + amount；然后写回记分板。
+
+15. list_player_identities
+
+- 描述：分页列出 `player_identities` 表中的所有记录，便于查看 UUID ↔ 玩家名缓存。
+- 请求：
+
+```json
+{ "key": "<key>", "page": 1, "pageSize": 100 }
+```
+
+- ACK 成功示例：
+
+```json
+{
+  "success": true,
+  "total": 1234,
+  "page": 1,
+  "page_size": 100,
+  "records": [
+    {
+      "player_uuid": "...",
+      "player_name": "Steve",
+      "first_played": 1708236523123,
+      "last_played": 1708890123456,
+      "last_updated": 1708891123999
+    }
+  ]
+}
+```
+
+- 说明：
+  - `page` 默认 1，`pageSize` 默认 100，最大 1000；若超页会自动回落到第一页。
+  - 排序：`last_updated` DESC（最新在前）。
+  - `first_played` / `last_played` 可能为 `null`，表示无法从 NBT 解析。
+
+16. execute_sql（GraphQL/运维直通）
+
+- 描述：管理员用只读 SQL 执行入口，允许直接发出单条 `SELECT` / `PRAGMA` 语句，便于 GraphQL 代理或应急排查。
+- 请求：
+
+```json
+{
+  "key": "<key>",
+  "sql": "SELECT player_uuid, player_name FROM player_identities",
+  "maxRows": 200
+}
+```
+
+- ACK 成功示例：
+
+```json
+{
+  "success": true,
+  "columns": ["player_uuid", "player_name"],
+  "rows": [{ "player_uuid": "...", "player_name": "Steve" }],
+  "truncated": false
+}
+```
+
+- 约束与行为：
+  - 仅允许以 `SELECT` 或 `PRAGMA` 开头的单条语句；其它语句会返回 `INVALID_ARGUMENT`。
+  - `maxRows` 默认为 200，上限 1000；超出上限会被截断，`truncated: true` 表示结果被截断。
+  - `columns` 顺序按 JDBC `columnLabel` 返回；`rows` 为对象数组，键为列名，值为 JDBC `getObject` 结果。
+  - 若语句无结果集（例如 PRAGMA 但驱动未返回行），`columns`/`rows` 为空数组。
 
 ## 错误与状态碼
 

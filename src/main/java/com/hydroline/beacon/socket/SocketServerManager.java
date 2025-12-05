@@ -23,6 +23,7 @@ import java.net.InetSocketAddress;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
+import java.sql.ResultSetMetaData;
 import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -60,7 +61,7 @@ public class SocketServerManager {
         server.start();
 
         plugin.getLogger().info("Socket.IO server started on port " + cfg.getPort());
-        plugin.getLogger().info("Socket.IO events registered: force_update, get_player_advancements, get_player_stats, list_online_players, get_server_time, get_player_mtr_logs, get_mtr_log_detail, get_player_sessions, get_player_nbt, lookup_player_identity, get_status");
+        plugin.getLogger().info("Socket.IO events registered: force_update, get_player_advancements, get_player_stats, list_online_players, get_server_time, get_player_mtr_logs, get_mtr_log_detail, get_player_sessions, get_player_nbt, lookup_player_identity, list_player_identities, execute_sql, get_status");
     }
 
     public void stop() {
@@ -339,6 +340,25 @@ public class SocketServerManager {
                     }
                 });
 
+        // list_player_identities: paginated dump of player_identities table
+        server.addEventListener("list_player_identities", PlayerIdentitiesListRequest.class,
+                (client, data, ackSender) -> {
+                    if (!validateKey(data.getKey())) {
+                        sendError(ackSender, "INVALID_KEY");
+                        return;
+                    }
+                    try {
+                        Map<String, Object> result = loadPlayerIdentities(
+                                data.getPage(),
+                                data.getPageSize()
+                        );
+                        result.put("success", true);
+                        ackSender.sendAckData(result);
+                    } catch (SQLException e) {
+                        sendError(ackSender, "DB_ERROR: " + e.getMessage());
+                    }
+                });
+
         // get_player_nbt: return raw NBT as JSON (cached in SQLite for X minutes)
         server.addEventListener("get_player_nbt", PlayerIdentityRequest.class,
                 (client, data, ackSender) -> {
@@ -386,6 +406,24 @@ public class SocketServerManager {
                         ackSender.sendAckData(resp);
                     } catch (InterruptedException | ExecutionException e) {
                         sendError(ackSender, "INTERNAL_ERROR: " + e.getMessage());
+                    } catch (SQLException e) {
+                        sendError(ackSender, "DB_ERROR: " + e.getMessage());
+                    }
+                });
+
+        // execute_sql: read-only SELECT/PRAGMA helper for admin/GraphQL bridge
+        server.addEventListener("execute_sql", ExecuteSqlRequest.class,
+                (client, data, ackSender) -> {
+                    if (!validateKey(data.getKey())) {
+                        sendError(ackSender, "INVALID_KEY");
+                        return;
+                    }
+                    try {
+                        Map<String, Object> result = executeSelectSql(data.getSql(), data.getMaxRows());
+                        result.put("success", true);
+                        ackSender.sendAckData(result);
+                    } catch (IllegalArgumentException e) {
+                        sendError(ackSender, "INVALID_ARGUMENT: " + e.getMessage());
                     } catch (SQLException e) {
                         sendError(ackSender, "DB_ERROR: " + e.getMessage());
                     }
@@ -1184,6 +1222,44 @@ public class SocketServerManager {
         return totals;
     }
 
+    private Map<String, Object> loadPlayerIdentities(Integer pageParam, Integer pageSizeParam) throws SQLException {
+        int page = pageParam != null ? pageParam : 1;
+        int pageSize = pageSizeParam != null ? pageSizeParam : 100;
+        if (page <= 0) page = 1;
+        if (pageSize <= 0) pageSize = 100;
+        if (pageSize > 1000) pageSize = 1000;
+
+        Map<String, Object> result = new HashMap<>();
+        List<Map<String, Object>> records = new ArrayList<>();
+        try (Connection conn = plugin.getDatabaseManager().getConnection()) {
+            try (PreparedStatement cps = conn.prepareStatement("SELECT COUNT(*) FROM player_identities")) {
+                try (ResultSet rs = cps.executeQuery()) {
+                    result.put("total", rs.next() ? rs.getLong(1) : 0L);
+                }
+            }
+            long total = (long) result.get("total");
+            int offset = (page - 1) * pageSize;
+            if (offset >= total) {
+                offset = 0;
+                page = 1;
+            }
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "SELECT player_uuid, player_name, first_played, last_played, last_updated FROM player_identities ORDER BY last_updated DESC LIMIT ? OFFSET ?")) {
+                ps.setInt(1, pageSize);
+                ps.setInt(2, offset);
+                try (ResultSet rs = ps.executeQuery()) {
+                    while (rs.next()) {
+                        records.add(mapIdentityRow(rs));
+                    }
+                }
+            }
+        }
+        result.put("records", records);
+        result.put("page", page);
+        result.put("page_size", pageSize);
+        return result;
+    }
+
     private String ensurePlayerUuid(String playerUuid, String playerName) throws SQLException {
         if (playerUuid != null && !playerUuid.isEmpty()) return playerUuid;
         if (playerName != null && !playerName.isEmpty()) return resolveUuidByName(playerName);
@@ -1360,6 +1436,62 @@ public class SocketServerManager {
         return null;
     }
 
+    private Map<String, Object> executeSelectSql(String sql, Integer maxRows) throws SQLException {
+        if (sql == null || sql.trim().isEmpty()) {
+            throw new IllegalArgumentException("sql is required");
+        }
+        String trimmed = sql.trim();
+        String lower = trimmed.toLowerCase(java.util.Locale.ROOT);
+        if (!(lower.startsWith("select") || lower.startsWith("pragma"))) {
+            throw new IllegalArgumentException("Only SELECT or PRAGMA statements are allowed");
+        }
+
+        int limit = maxRows != null ? maxRows : 200;
+        if (limit <= 0) limit = 1;
+        if (limit > 1000) limit = 1000;
+
+        Map<String, Object> result = new HashMap<>();
+        List<String> columns = new ArrayList<>();
+        List<Map<String, Object>> rows = new ArrayList<>();
+        boolean truncated = false;
+
+        try (Connection conn = plugin.getDatabaseManager().getConnection();
+             PreparedStatement ps = conn.prepareStatement(trimmed)) {
+            ps.setMaxRows(limit + 1); // fetch one extra row to signal truncation
+            boolean hasResult = ps.execute();
+            if (!hasResult) {
+                result.put("columns", columns);
+                result.put("rows", rows);
+                result.put("truncated", false);
+                return result;
+            }
+
+            try (ResultSet rs = ps.getResultSet()) {
+                ResultSetMetaData meta = rs.getMetaData();
+                int colCount = meta.getColumnCount();
+                for (int i = 1; i <= colCount; i++) {
+                    columns.add(meta.getColumnLabel(i));
+                }
+                while (rs.next()) {
+                    if (rows.size() >= limit) {
+                        truncated = true;
+                        break;
+                    }
+                    Map<String, Object> row = new HashMap<>();
+                    for (int i = 1; i <= colCount; i++) {
+                        row.put(columns.get(i - 1), rs.getObject(i));
+                    }
+                    rows.add(row);
+                }
+            }
+        }
+
+        result.put("columns", columns);
+        result.put("rows", rows);
+        result.put("truncated", truncated);
+        return result;
+    }
+
     public interface AuthPayload {
         String getKey();
     }
@@ -1426,6 +1558,21 @@ public class SocketServerManager {
         public List<String> getKeys() { return keys; }
         public void setKeys(List<String> keys) { this.keys = keys; }
 
+        public Integer getPage() { return page; }
+        public void setPage(Integer page) { this.page = page; }
+        public Integer getPageSize() { return pageSize; }
+        public void setPageSize(Integer pageSize) { this.pageSize = pageSize; }
+    }
+
+    public static class PlayerIdentitiesListRequest implements AuthPayload {
+        private String key;
+        private Integer page;
+        private Integer pageSize;
+
+        public PlayerIdentitiesListRequest() {}
+
+        public String getKey() { return key; }
+        public void setKey(String key) { this.key = key; }
         public Integer getPage() { return page; }
         public void setPage(Integer page) { this.page = page; }
         public Integer getPageSize() { return pageSize; }
@@ -1524,6 +1671,21 @@ public class SocketServerManager {
         public void setPage(int page) { this.page = page; }
         public int getPageSize() { return pageSize; }
         public void setPageSize(int pageSize) { this.pageSize = pageSize; }
+    }
+
+    public static class ExecuteSqlRequest implements AuthPayload {
+        private String key;
+        private String sql;
+        private Integer maxRows;
+
+        public ExecuteSqlRequest() {}
+
+        public String getKey() { return key; }
+        public void setKey(String key) { this.key = key; }
+        public String getSql() { return sql; }
+        public void setSql(String sql) { this.sql = sql; }
+        public Integer getMaxRows() { return maxRows; }
+        public void setMaxRows(Integer maxRows) { this.maxRows = maxRows; }
     }
 
     public static class PlayerBalanceRequest implements AuthPayload {
