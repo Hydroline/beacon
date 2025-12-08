@@ -10,6 +10,9 @@ import com.corundumstudio.socketio.listener.DisconnectListener;
 import com.corundumstudio.socketio.listener.ExceptionListener;
 import com.hydroline.beacon.BeaconPlugin;
 import com.hydroline.beacon.config.PluginConfig;
+import com.hydroline.beacon.provider.actions.BeaconProviderActions;
+import com.hydroline.beacon.provider.channel.BeaconActionCall;
+import com.hydroline.beacon.provider.channel.BeaconProviderClient;
 import com.hydroline.beacon.task.AdvancementsAndStatsScanner;
 import com.hydroline.beacon.task.MtrLogsScanner;
 import org.bukkit.Bukkit;
@@ -61,7 +64,7 @@ public class SocketServerManager {
         server.start();
 
         plugin.getLogger().info("Socket.IO server started on port " + cfg.getPort());
-        plugin.getLogger().info("Socket.IO events registered: force_update, get_player_advancements, get_player_stats, list_online_players, get_server_time, get_player_mtr_logs, get_mtr_log_detail, get_player_sessions, get_player_nbt, lookup_player_identity, list_player_identities, get_players_data, execute_sql, get_status");
+        plugin.getLogger().info("Socket.IO events registered: force_update, get_player_advancements, get_player_stats, list_online_players, get_server_time, beacon_ping, get_mtr_network_overview, get_mtr_route_detail, list_mtr_nodes_paginated, list_mtr_depots, list_mtr_fare_areas, get_mtr_station_timetable, list_mtr_stations, get_mtr_route_trains, get_mtr_depot_trains, get_player_mtr_logs, get_mtr_log_detail, get_player_sessions, get_player_nbt, lookup_player_identity, list_player_identities, get_players_data, execute_sql, get_status");
     }
 
     public void stop() {
@@ -205,6 +208,120 @@ public class SocketServerManager {
                     } catch (InterruptedException | ExecutionException e) {
                         sendError(ackSender, "INTERNAL_ERROR: " + e.getMessage());
                     }
+                });
+
+        // Beacon Provider passthrough events (MTR data, trains, etc.)
+        server.addEventListener("beacon_ping", BeaconPingEventRequest.class,
+                (client, data, ackSender) -> {
+                    if (!validateKey(data.getKey())) {
+                        sendError(ackSender, "INVALID_KEY");
+                        return;
+                    }
+                    forwardBeaconAction(ackSender, BeaconProviderActions.ping(data.getEcho()));
+                });
+
+        server.addEventListener("get_mtr_network_overview", MtrDimensionRequest.class,
+                (client, data, ackSender) -> {
+                    if (!validateKey(data.getKey())) { sendError(ackSender, "INVALID_KEY"); return; }
+                    forwardBeaconAction(ackSender, BeaconProviderActions.listNetworkOverview(data.getDimension()));
+                });
+
+        server.addEventListener("get_mtr_route_detail", MtrRouteRequest.class,
+                (client, data, ackSender) -> {
+                    if (!validateKey(data.getKey())) { sendError(ackSender, "INVALID_KEY"); return; }
+                    if (isNullOrEmpty(data.getDimension())) {
+                        sendError(ackSender, "INVALID_ARGUMENT: dimension is required");
+                        return;
+                    }
+                    if (data.getRouteId() <= 0) {
+                        sendError(ackSender, "INVALID_ARGUMENT: routeId must be > 0");
+                        return;
+                    }
+                    forwardBeaconAction(ackSender, BeaconProviderActions.getRouteDetail(data.getDimension(), data.getRouteId()));
+                });
+
+        server.addEventListener("list_mtr_nodes_paginated", MtrNodesPageRequest.class,
+                (client, data, ackSender) -> {
+                    if (!validateKey(data.getKey())) { sendError(ackSender, "INVALID_KEY"); return; }
+                    if (isNullOrEmpty(data.getDimension())) {
+                        sendError(ackSender, "INVALID_ARGUMENT: dimension is required");
+                        return;
+                    }
+                    Integer limit = data.getLimit();
+                    if (limit != null && (limit <= 0 || limit > 2048)) {
+                        sendError(ackSender, "INVALID_ARGUMENT: limit must be between 1 and 2048");
+                        return;
+                    }
+                    forwardBeaconAction(ackSender, BeaconProviderActions.listNodesPaginated(data.getDimension(), data.getCursor(), limit));
+                });
+
+        server.addEventListener("list_mtr_depots", MtrDimensionRequest.class,
+                (client, data, ackSender) -> {
+                    if (!validateKey(data.getKey())) { sendError(ackSender, "INVALID_KEY"); return; }
+                    forwardBeaconAction(ackSender, BeaconProviderActions.listDepots(data.getDimension()));
+                });
+
+        server.addEventListener("list_mtr_fare_areas", MtrDimensionRequest.class,
+                (client, data, ackSender) -> {
+                    if (!validateKey(data.getKey())) { sendError(ackSender, "INVALID_KEY"); return; }
+                    if (isNullOrEmpty(data.getDimension())) {
+                        sendError(ackSender, "INVALID_ARGUMENT: dimension is required");
+                        return;
+                    }
+                    forwardBeaconAction(ackSender, BeaconProviderActions.listFareAreas(data.getDimension()));
+                });
+
+        server.addEventListener("get_mtr_station_timetable", MtrStationTimetableRequest.class,
+                (client, data, ackSender) -> {
+                    if (!validateKey(data.getKey())) { sendError(ackSender, "INVALID_KEY"); return; }
+                    if (isNullOrEmpty(data.getDimension())) {
+                        sendError(ackSender, "INVALID_ARGUMENT: dimension is required");
+                        return;
+                    }
+                    if (data.getStationId() <= 0) {
+                        sendError(ackSender, "INVALID_ARGUMENT: stationId must be > 0");
+                        return;
+                    }
+                    forwardBeaconAction(ackSender, BeaconProviderActions.getStationTimetable(
+                            data.getDimension(), data.getStationId(), data.getPlatformId()));
+                });
+
+        server.addEventListener("list_mtr_stations", MtrDimensionRequest.class,
+                (client, data, ackSender) -> {
+                    if (!validateKey(data.getKey())) { sendError(ackSender, "INVALID_KEY"); return; }
+                    if (isNullOrEmpty(data.getDimension())) {
+                        sendError(ackSender, "INVALID_ARGUMENT: dimension is required");
+                        return;
+                    }
+                    forwardBeaconAction(ackSender, BeaconProviderActions.listStations(data.getDimension()));
+                });
+
+        server.addEventListener("get_mtr_route_trains", MtrRouteRequest.class,
+                (client, data, ackSender) -> {
+                    if (!validateKey(data.getKey())) { sendError(ackSender, "INVALID_KEY"); return; }
+                    if (isNullOrEmpty(data.getDimension())) {
+                        sendError(ackSender, "INVALID_ARGUMENT: dimension is required");
+                        return;
+                    }
+                    if (data.getRouteId() <= 0) {
+                        sendError(ackSender, "INVALID_ARGUMENT: routeId must be > 0");
+                        return;
+                    }
+                    forwardBeaconAction(ackSender, BeaconProviderActions.getRouteTrains(data.getDimension(), data.getRouteId()));
+                });
+
+        server.addEventListener("get_mtr_depot_trains", MtrDepotRequest.class,
+                (client, data, ackSender) -> {
+                    if (!validateKey(data.getKey())) { sendError(ackSender, "INVALID_KEY"); return; }
+                    if (isNullOrEmpty(data.getDimension())) {
+                        sendError(ackSender, "INVALID_ARGUMENT: dimension is required");
+                        return;
+                    }
+                    if (data.getDepotId() <= 0) {
+                        sendError(ackSender, "INVALID_ARGUMENT: depotId must be > 0");
+                        return;
+                    }
+                    forwardBeaconAction(ackSender, BeaconProviderActions.getDepotTrains(data.getDimension(), data.getDepotId()));
                 });
 
         // get_player_mtr_logs: list MTR logs with optional filters & pagination
@@ -813,6 +930,41 @@ public class SocketServerManager {
         resp.put("success", false);
         resp.put("error", message);
         ackSender.sendAckData(resp);
+    }
+
+    private <T> void forwardBeaconAction(AckRequest ackSender, BeaconActionCall<T> call) {
+        BeaconProviderClient client = plugin.getBeaconProviderClient();
+        if (client == null || !client.isStarted()) {
+            sendError(ackSender, "BEACON_PROVIDER_OFFLINE");
+            return;
+        }
+        client.sendAction(call).whenComplete((response, throwable) -> {
+            if (throwable != null) {
+                String msg = getRootMessage(throwable);
+                plugin.getLogger().warning("Beacon Provider action failed: " + msg);
+                sendError(ackSender, "BEACON_PROVIDER_ERROR: " + msg);
+                return;
+            }
+            Map<String, Object> resp = new HashMap<>();
+            resp.put("success", response.isOk());
+            resp.put("result", response.getResult().name());
+            resp.put("message", response.getMessage());
+            resp.put("request_id", response.getRequestId());
+            resp.put("payload", response.getPayload());
+            ackSender.sendAckData(resp);
+        });
+    }
+
+    private boolean isNullOrEmpty(String value) {
+        return value == null || value.trim().isEmpty();
+    }
+
+    private String getRootMessage(Throwable throwable) {
+        Throwable current = throwable;
+        while (current.getCause() != null && current.getCause() != current) {
+            current = current.getCause();
+        }
+        return current.getMessage() != null ? current.getMessage() : current.toString();
     }
 
     private Set<String> normalizeFilterKeys(List<String> keys) {
@@ -1801,6 +1953,108 @@ public class SocketServerManager {
         }
     }
 
+    public static class BeaconPingEventRequest extends AuthOnlyRequest {
+        private String echo;
+
+        public String getEcho() {
+            return echo;
+        }
+
+        public void setEcho(String echo) {
+            this.echo = echo;
+        }
+    }
+
+    public static class MtrDimensionRequest implements AuthPayload {
+        private String key;
+        private String dimension;
+
+        public MtrDimensionRequest() {
+        }
+
+        public String getKey() {
+            return key;
+        }
+
+        public void setKey(String key) {
+            this.key = key;
+        }
+
+        public String getDimension() {
+            return dimension;
+        }
+
+        public void setDimension(String dimension) {
+            this.dimension = dimension;
+        }
+    }
+
+    public static class MtrRouteRequest extends MtrDimensionRequest {
+        private long routeId;
+
+        public long getRouteId() {
+            return routeId;
+        }
+
+        public void setRouteId(long routeId) {
+            this.routeId = routeId;
+        }
+    }
+
+    public static class MtrNodesPageRequest extends MtrDimensionRequest {
+        private String cursor;
+        private Integer limit;
+
+        public String getCursor() {
+            return cursor;
+        }
+
+        public void setCursor(String cursor) {
+            this.cursor = cursor;
+        }
+
+        public Integer getLimit() {
+            return limit;
+        }
+
+        public void setLimit(Integer limit) {
+            this.limit = limit;
+        }
+    }
+
+    public static class MtrStationTimetableRequest extends MtrDimensionRequest {
+        private long stationId;
+        private Long platformId;
+
+        public long getStationId() {
+            return stationId;
+        }
+
+        public void setStationId(long stationId) {
+            this.stationId = stationId;
+        }
+
+        public Long getPlatformId() {
+            return platformId;
+        }
+
+        public void setPlatformId(Long platformId) {
+            this.platformId = platformId;
+        }
+    }
+
+    public static class MtrDepotRequest extends MtrDimensionRequest {
+        private long depotId;
+
+        public long getDepotId() {
+            return depotId;
+        }
+
+        public void setDepotId(long depotId) {
+            this.depotId = depotId;
+        }
+    }
+
     public static class ForceUpdateRequest implements AuthPayload {
         private String key;
 
@@ -2026,4 +2280,3 @@ public class SocketServerManager {
         public void setAmount(long amount) { this.amount = amount; }
     }
 }
-

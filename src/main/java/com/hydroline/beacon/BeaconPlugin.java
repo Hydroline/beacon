@@ -3,6 +3,7 @@ package com.hydroline.beacon;
 import com.hydroline.beacon.config.ConfigManager;
 import com.hydroline.beacon.config.PluginConfig;
 import com.hydroline.beacon.listener.PlayerSessionListener;
+import com.hydroline.beacon.provider.channel.BeaconProviderClient;
 import com.hydroline.beacon.socket.SocketServerManager;
 import com.hydroline.beacon.storage.DatabaseManager;
 import com.hydroline.beacon.task.ScanScheduler;
@@ -19,6 +20,7 @@ public class BeaconPlugin extends JavaPlugin {
     private ScanScheduler scanScheduler;
     private WorldFileAccess worldFileAccess;
     private SocketServerManager socketServerManager;
+    private BeaconProviderClient beaconProviderClient;
 
     @Override
     public void onEnable() {
@@ -33,6 +35,9 @@ public class BeaconPlugin extends JavaPlugin {
         this.databaseManager = new DatabaseManager(this);
         this.worldFileAccess = new WorldFileAccess(Bukkit.getWorlds());
         Bukkit.getPluginManager().registerEvents(new PlayerSessionListener(this), this);
+
+        this.beaconProviderClient = new BeaconProviderClient(this);
+        this.beaconProviderClient.start();
 
         Bukkit.getScheduler().runTaskAsynchronously(this, () -> {
             try {
@@ -69,6 +74,9 @@ public class BeaconPlugin extends JavaPlugin {
         if (this.socketServerManager != null) {
             this.socketServerManager.stop();
         }
+        if (this.beaconProviderClient != null) {
+            this.beaconProviderClient.stop();
+        }
         // On shutdown, ensure any players whose last event is JOIN receive an ABNORMAL_QUIT record
         try {
             int fixed = closeOpenSessions(System.currentTimeMillis());
@@ -91,6 +99,10 @@ public class BeaconPlugin extends JavaPlugin {
 
     public WorldFileAccess getWorldFileAccess() {
         return worldFileAccess;
+    }
+
+    public BeaconProviderClient getBeaconProviderClient() {
+        return beaconProviderClient;
     }
 
     /**
