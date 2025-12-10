@@ -26,13 +26,9 @@ BEACON_PORT=48080 BEACON_KEY=... node test-socketio.js mtr         # 仅运行 M
 | `OUTPUT_DIR`             | 输出目录                                                | `tests/output`        |
 | `BEACON_PLAYER_UUID`     | 玩家 UUID，用于 player 相关事件                         | 可选                  |
 | `BEACON_PLAYER_NAME`     | 玩家名称（当 UUID 缺失时可用）                          | 可选                  |
-| `BEACON_MTR_DIMENSION`   | MTR 相关 action 用的维度                                | `minecraft:overworld` |
-| `BEACON_MTR_ROUTE_ID`    | `get_mtr_route_detail/get_mtr_route_trains` 用的线路 ID；缺省时自动从 `get_mtr_network_overview` 选取 | 可选 |
-| `BEACON_MTR_STATION_ID`  | `get_mtr_station_timetable` 用的站点 ID；缺省时自动从 `list_mtr_stations` 选取，与上面线路匹配优先 | 可选 |
-| `BEACON_MTR_PLATFORM_ID` | 指定站台 ID（配合 `BEACON_MTR_STATION_ID`）；缺省时会自动挑选对应站点首个站台/线路匹配站台       | 可选 |
-| `BEACON_MTR_DEPOT_ID`    | `get_mtr_depot_trains` 用的车厂 ID；缺省时根据线路寻找关联车厂，若无则取列表首条                 | 可选 |
+| `BEACON_MTR_DIMENSION`   | MTR 相关 action 用的维度，会转成 GraphQL 的 `dimensionContext`（例如 `minecraft:overworld` → `mtr/minecraft/overworld`） | `minecraft:overworld` |
 
-> 提示：`BEACON_PLAYER_UUID/NAME` 未提供时，会跳过玩家专属事件但仍执行其他测试；MTR 相关 ID 未设置时会自动发现可用样本，再写入 `mtr_auto_targets.json` 供核验。
+> 提示：`BEACON_PLAYER_UUID/NAME` 未提供时，会跳过玩家专属事件但仍执行其他测试；MTR 维度用于 GraphQL 查询的 `dimensionContext`，只要 `world/mtr` 目录存在就可以正常回填数据。
 
 ## 事件分类
 
@@ -56,41 +52,22 @@ BEACON_PORT=48080 BEACON_KEY=... node test-socketio.js mtr         # 仅运行 M
 ### mtr 分类
 
 - `beacon_ping`
-- `get_mtr_network_overview`
-- `list_mtr_nodes_paginated`（脚本会自动分页拉取直至 `hasMore=false`，结果写入 `output/mtr_nodes_<dimension>/nodes_page_XXXX.json`）
-- `list_mtr_depots`
-- `list_mtr_fare_areas`
-- `list_mtr_stations`
-- `get_mtr_route_detail`
-- `get_mtr_route_trains`
-- `get_mtr_station_timetable`
-- `get_mtr_depot_trains`
+- `query_mtr_entities`
 
-脚本会自动遍历当前维度下发现的所有路线、站点、车厂，逐一调用上述四个 action，并把响应写入下列目录（若设置了 `BEACON_MTR_*`，仍会优先使用显式 ID，仅对未覆盖的条目进行自动遍历）：
+`query_mtr_entities` 会按 `depots/platforms/rails/routes/signal-blocks/stations` 六个 category 依次拉取数据，并将返回的 rows 写入 `output/mtr_<category>.json`。每个 payload 中都包含 `entity_id`/`transport_mode`/`name`/`payload` 等字段（payload 即 MessagePack 解析后的 JSON）；GraphQL 查询还会传入 `dimensionContext`（由 `BEACON_MTR_DIMENSION` 构建）以限定目标维度。
 
-- `output/mtr_routes_<dimension>/route_<id>_detail.json`
-- `output/mtr_routes_<dimension>/route_<id>_trains.json`
-- `output/mtr_station_timetables_<dimension>/station_<id>_timetable.json`
-- `output/mtr_depot_trains_<dimension>/depot_<id>_trains.json`
+为验证过滤、排序与 payload 可选项，脚本还会额外：
 
-若某条数据无法获取（例如 Provider 暂无响应），对应文件会记录 `success: false` 与错误信息，方便排查。
+- `output/mtr_stations_filtered.json`：基于第一条 station 的 `entity_id` 精确过滤一次 `stations` 分类。
+- `output/mtr_routes_sorted.json`：按 `orderBy=name`、`orderDir=ASC` 请求 `routes` 分类，同时将 `includePayload` 设为 `false` 以确保证书可以碾平结构。
 
-### 自动发现逻辑
+### 输出结构
 
-1. `list_mtr_stations`、`list_mtr_depots`、`get_mtr_network_overview` 成功后，会统计所有可用线路/站点/车厂并寻找与指定维度匹配的条目。
-2. 线路优先选择第一条 `hidden=false` 的线路；若未找到则使用列表第一项。
-3. 站点/站台优先挑选包含上述线路 ID 的站台，找不到则退回列表首个有站台的站点。
-4. 车厂优先挑选关联该线路的车厂，找不到则使用第一条记录。
-5. 自动选择的 ID（含名称）写入 `output/mtr_auto_targets.json`，方便对照 Provider 数据；若某类数据为空，会在脚本里提示跳过对应事件。
+- `output/mtr_depots.json`、`output/mtr_platforms.json`、`output/mtr_rails.json`、`output/mtr_routes.json`、`output/mtr_signal_blocks.json`、`output/mtr_stations.json`：六个 category 的 GraphQL 响应，载有 `payload` 字段可直接用于多表查询。
+- `output/mtr_stations_filtered.json`：`entity_id` 过滤结果。
+- `output/mtr_routes_sorted.json`：按线路名称排序但省略 payload 的 routes 快速列表。
 
-## 全量导出结构
-
-- `output/mtr_nodes_<dimension>/nodes_page_XXXX.json`：按 `limit=512` 逐页遍历 `list_mtr_nodes_paginated`，直到 `hasMore=false`。同时保留旧的 `output/mtr_nodes_page1.json` 便于快速查看第一页。
-- `output/mtr_routes_<dimension>/...`：所有线路的 `get_mtr_route_detail` 与 `get_mtr_route_trains`。
-- `output/mtr_station_timetables_<dimension>/...`：每个站点的 `get_mtr_station_timetable`（不带 platformId，默认返回站内全部站台）。
-- `output/mtr_depot_trains_<dimension>/...`：每个车厂的 `get_mtr_depot_trains`。
-
-> 注意：如果线路/车站数量较多，导出过程会持续一段时间并生成大量文件，请预留足够磁盘空间再运行。
+> 注意：MTR 相关数据来自 Bukkit 插件周期扫描的 `world/mtr`，初次运行可能需要先执行 `force_update` 或等待扫描完成，否则 `query_mtr_entities` 可能返回空数组。
 
 ## 输出格式
 

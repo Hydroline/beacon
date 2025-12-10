@@ -1,7 +1,12 @@
 port: 48080
 key: ""
 interval_time: 200
+
+# World/MTR 结构数据扫描（跳过 logs，采用异步 diff + 批量 processing）
+mtr_world_scan_enabled: true
+mtr_world_scan_batch_size: 16
+
 # NBT 缓存时间（分钟），用于 get_player_nbt 的 JSON 缓存
 nbt_cache_ttl_minutes: 10
-version: 1
 
+version: 1

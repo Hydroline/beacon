@@ -24,6 +24,9 @@
 - 调整建议：
   - 想减少总日志频率为“每 `interval_time` 才有一条”：可将 MTR 任务的初始延迟改为与另一任务一致（需要修改源码 `ScanScheduler`）。
   - 想让任务更快或更慢：直接改 `interval_time`；记得将秒换算成 tick（秒 × 20）。
+- 新增配置项：
+  - `mtr_world_scan_enabled`：是否启用对 `world/mtr/<namespace>/<dimension>` 下的 `depots/platforms/rails/routes/signal-blocks/stations` 的异步扫描。该扫描跳过 `logs`，直接将结构化数据落到 SQLite（默认为 `true`）。
+  - `mtr_world_scan_batch_size`：每轮扫描最多处理的文件数（默认 `16`），配合 `interval_time` 控制每秒对磁盘的压测频率，适当调小可以降低 IO 峰值。
 
 ## 全事件清单（详尽说明）
 
@@ -534,7 +537,67 @@
   - stats/advancements：按提供的 UUID 集合过滤；值结构与单人接口一致（advancement 值为 JSON 字符串）。
   - **数据清洗**：`stats` 返回值已在服务端去除 `$type`/`value` 等包装，保证是标准 JSON 基础类型（字符串/数值/布尔/数组/对象），可直接写入下游存储（如 Prisma）。
 
-17. execute_sql（GraphQL/运维直通）
+18. query_mtr_entities（MTR world 数据查询）
+
+- 描述：提供 `world/mtr` 所有非 logs 结构化表（`mtr_depots`、`mtr_platforms`、`mtr_rails`、`mtr_routes`、`mtr_signal_blocks`、`mtr_stations`）的过滤 + 分页查询入口。GraphQL/运维服务可通过本事件直接拉取 `payload`（JSON）字段并在服务端多表联查，而无需手动编写 SQL。
+- 请求：
+
+```json
+{
+  "key": "<key>",
+  "category": "stations",
+  "dimensionContext": "mtr/minecraft/overworld",
+  "filters": {
+    "name": "Central Station"
+  },
+  "limit": 100,
+  "offset": 0,
+  "orderBy": "last_updated",
+  "orderDir": "DESC",
+  "includePayload": true
+}
+```
+
+- ACK 成功示例：
+
+```json
+{
+  "success": true,
+  "category": "stations",
+  "limit": 100,
+  "offset": 0,
+  "truncated": false,
+  "rows": [
+    {
+      "entity_id": "5783697341042334399",
+      "transport_mode": "TRAIN",
+      "name": "南岸北|Nan'an Bei(N)",
+      "color": 14533560,
+      "file_path": "world/mtr/minecraft/overworld/stations/0/2158272963572037800",
+      "last_updated": 1700000000000,
+      "payload": {
+        "id": "5783697341042334399",
+        "transport_mode": "TRAIN",
+        "name": "南岸北|Nan'an Bei(N)",
+        "color": 14533560,
+        "x_min": -6305,
+        "zone": 3
+      }
+    }
+  ]
+}
+```
+
+- 说明：
+  - `category` 必填，取值为 `depots`/`platforms`/`rails`/`routes`/`signal-blocks`/`stations`，内部会切换到对应 `mtr_xxx` 表。
+  - `filters` 支持的字段为 `entity_id`、`transport_mode`、`name`、`color`、`file_path`（全部为精确匹配）。其它字段会被忽略。
+  - `dimensionContext` 可选，若提供会额外按 `dimension_context` 精确匹配，等效于限定 namespace + dimension。
+  - `limit` 默认 100，最大 500；`offset` 默认 0。`truncated: true` 表示还有更多满足条件的行（GraphQL 分页可据此决定是否继续查询）。
+  - `orderBy` 仅允许 `entity_id`/`name`/`color`/`last_updated`，默认 `last_updated`，`orderDir` 允许 `ASC`/`DESC`（默认为 `DESC`）。
+  - `includePayload` 控制是否在返回结果中携带 `payload`（默认 `true`）。`payload` 为 JSON 结构，由插件在扫描时写入，GraphQL 可直接当作对象使用。
+  - `rows` 中的 `last_updated` 对应数据库更新（进程最后一次扫描）时间戳。
+
+18. execute_sql（GraphQL/运维直通）
 
 - 描述：管理员用只读 SQL 执行入口，允许直接发出单条 `SELECT` / `PRAGMA` 语句，便于 GraphQL 代理或应急排查。
 - 请求：

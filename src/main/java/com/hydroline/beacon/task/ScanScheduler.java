@@ -11,6 +11,7 @@ public class ScanScheduler {
     private BukkitTask advancementsAndStatsTask;
     private BukkitTask mtrLogsTask;
     private BukkitTask nbtIdentityTask;
+    private BukkitTask mtrWorldTask;
 
     public ScanScheduler(BeaconPlugin plugin) {
         this.plugin = plugin;
@@ -33,6 +34,12 @@ public class ScanScheduler {
                     new MtrLogsScanner(plugin).scanOnce();
                 }, interval / 2, interval);
 
+        long worldDelay = Math.max(1L, interval / 3);
+        mtrWorldTask = Bukkit.getScheduler()
+                .runTaskTimerAsynchronously(plugin, () -> {
+                    new MtrWorldScanner(plugin).scanOnce();
+                }, worldDelay, interval);
+
         // periodically refresh UUID<->name mapping from playerdata
         nbtIdentityTask = Bukkit.getScheduler()
                 .runTaskTimerAsynchronously(plugin, () -> {
@@ -53,6 +60,9 @@ public class ScanScheduler {
             nbtIdentityTask.cancel();
             nbtIdentityTask = null;
         }
+        if (mtrWorldTask != null) {
+            mtrWorldTask.cancel();
+            mtrWorldTask = null;
+        }
     }
 }
-

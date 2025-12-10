@@ -52,8 +52,26 @@ public class ConfigManager {
             cfg.set("nbt_cache_ttl_minutes", nbtCacheTtlMinutes);
         }
 
+        if (!cfg.contains("mtr_world_scan_enabled")) {
+            cfg.set("mtr_world_scan_enabled", true);
+        }
+        boolean mtrWorldScanEnabled = cfg.getBoolean("mtr_world_scan_enabled");
+        long mtrWorldScanBatchSize = cfg.getLong("mtr_world_scan_batch_size");
+        if (mtrWorldScanBatchSize <= 0) {
+            mtrWorldScanBatchSize = 16;
+            cfg.set("mtr_world_scan_batch_size", mtrWorldScanBatchSize);
+        }
+
         plugin.saveConfig();
-        currentConfig = new PluginConfig(port, key, intervalTicks, version, nbtCacheTtlMinutes);
+        currentConfig = new PluginConfig(
+                port,
+                key,
+                intervalTicks,
+                version,
+                nbtCacheTtlMinutes,
+                mtrWorldScanEnabled,
+                (int) mtrWorldScanBatchSize
+        );
     }
 
     public PluginConfig getCurrentConfig() {
@@ -70,4 +88,3 @@ public class ConfigManager {
         return sb.toString();
     }
 }
-

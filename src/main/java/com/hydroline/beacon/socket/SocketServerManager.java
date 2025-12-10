@@ -8,8 +8,11 @@ import com.corundumstudio.socketio.SocketIOServer;
 import com.corundumstudio.socketio.listener.ConnectListener;
 import com.corundumstudio.socketio.listener.DisconnectListener;
 import com.corundumstudio.socketio.listener.ExceptionListener;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.hydroline.beacon.BeaconPlugin;
 import com.hydroline.beacon.config.PluginConfig;
+import com.hydroline.beacon.mtr.MtrCategory;
 import com.hydroline.beacon.provider.actions.BeaconProviderActions;
 import com.hydroline.beacon.provider.channel.BeaconActionCall;
 import com.hydroline.beacon.provider.channel.BeaconProviderClient;
@@ -22,6 +25,7 @@ import org.bukkit.entity.Player;
 
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.handler.codec.http.HttpHeaders;
+import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
@@ -42,6 +46,7 @@ import java.util.concurrent.Future;
 public class SocketServerManager {
 
     private final BeaconPlugin plugin;
+    private static final ObjectMapper JSON_MAPPER = new ObjectMapper();
     private SocketIOServer server;
     private final Map<UUID, Long> connectionOpenAt = new ConcurrentHashMap<>();
 
@@ -64,7 +69,7 @@ public class SocketServerManager {
         server.start();
 
         plugin.getLogger().info("Socket.IO server started on port " + cfg.getPort());
-        plugin.getLogger().info("Socket.IO events registered: force_update, get_player_advancements, get_player_stats, list_online_players, get_server_time, beacon_ping, get_mtr_network_overview, get_mtr_route_detail, list_mtr_nodes_paginated, list_mtr_depots, list_mtr_fare_areas, get_mtr_station_timetable, list_mtr_stations, get_mtr_route_trains, get_mtr_depot_trains, get_player_mtr_logs, get_mtr_log_detail, get_player_sessions, get_player_nbt, lookup_player_identity, list_player_identities, get_players_data, execute_sql, get_status");
+        plugin.getLogger().info("Socket.IO events registered: force_update, get_player_advancements, get_player_stats, list_online_players, get_server_time, beacon_ping, get_mtr_network_overview, get_mtr_route_detail, list_mtr_nodes_paginated, list_mtr_depots, list_mtr_fare_areas, get_mtr_station_timetable, list_mtr_stations, get_mtr_route_trains, get_mtr_depot_trains, get_player_mtr_logs, get_mtr_log_detail, get_player_sessions, get_player_nbt, lookup_player_identity, list_player_identities, get_players_data, execute_sql, query_mtr_entities, get_status");
     }
 
     public void stop() {
@@ -633,6 +638,23 @@ public class SocketServerManager {
                         Map<String, Object> result = executeSelectSql(data.getSql(), data.getMaxRows());
                         result.put("success", true);
                         ackSender.sendAckData(result);
+                    } catch (IllegalArgumentException e) {
+                        sendError(ackSender, "INVALID_ARGUMENT: " + e.getMessage());
+                    } catch (SQLException e) {
+                        sendError(ackSender, "DB_ERROR: " + e.getMessage());
+                    }
+                });
+
+        server.addEventListener("query_mtr_entities", MtrQueryRequest.class,
+                (client, data, ackSender) -> {
+                    if (!validateKey(data.getKey())) {
+                        sendError(ackSender, "INVALID_KEY");
+                        return;
+                    }
+                    try {
+                        Map<String, Object> resp = queryMtrEntities(data);
+                        resp.put("success", true);
+                        ackSender.sendAckData(resp);
                     } catch (IllegalArgumentException e) {
                         sendError(ackSender, "INVALID_ARGUMENT: " + e.getMessage());
                     } catch (SQLException e) {
@@ -1857,6 +1879,105 @@ public class SocketServerManager {
         return null;
     }
 
+    private static final int DEFAULT_MTR_QUERY_LIMIT = 100;
+    private static final int MAX_MTR_QUERY_LIMIT = 500;
+
+    private Map<String, Object> queryMtrEntities(MtrQueryRequest request) throws SQLException {
+        if (request.getCategory() == null) {
+            throw new IllegalArgumentException("category required");
+        }
+        MtrCategory category = MtrCategory.fromKey(request.getCategory());
+        if (category == null) {
+            throw new IllegalArgumentException("unknown category: " + request.getCategory());
+        }
+        int limit = request.getLimit() != null ? request.getLimit() : DEFAULT_MTR_QUERY_LIMIT;
+        if (limit <= 0) {
+            limit = DEFAULT_MTR_QUERY_LIMIT;
+        }
+        if (limit > MAX_MTR_QUERY_LIMIT) {
+            limit = MAX_MTR_QUERY_LIMIT;
+        }
+        int offset = request.getOffset() != null ? Math.max(0, request.getOffset()) : 0;
+
+        String orderBy = request.getOrderBy();
+        if (orderBy == null || !category.getOrderableColumns().contains(orderBy)) {
+            orderBy = "last_updated";
+        }
+        String orderDir = "DESC";
+        if ("ASC".equalsIgnoreCase(request.getOrderDir())) {
+            orderDir = "ASC";
+        }
+
+        boolean includePayload = request.getIncludePayload() == null || request.getIncludePayload();
+
+        StringBuilder sql = new StringBuilder("SELECT entity_id, transport_mode, name, color, file_path, payload, last_updated FROM ");
+        sql.append(category.getTableName()).append(" WHERE 1=1");
+        List<Object> params = new ArrayList<>();
+
+        if (request.getDimensionContext() != null && !request.getDimensionContext().trim().isEmpty()) {
+            sql.append(" AND dimension_context = ?");
+            params.add(request.getDimensionContext().trim());
+        }
+
+        Map<String, Object> filters = request.getFilters();
+        if (filters != null) {
+            for (Map.Entry<String, Object> entry : filters.entrySet()) {
+                String column = entry.getKey();
+                if (column == null || !category.isFilterableColumn(column)) {
+                    continue;
+                }
+                sql.append(" AND ").append(column).append(" = ?");
+                params.add(entry.getValue());
+            }
+        }
+
+        sql.append(" ORDER BY ").append(orderBy).append(' ').append(orderDir);
+        sql.append(" LIMIT ? OFFSET ?");
+        params.add(limit);
+        params.add(offset);
+
+        List<Map<String, Object>> rows = new ArrayList<>();
+        try (Connection conn = plugin.getDatabaseManager().getConnection();
+             PreparedStatement ps = conn.prepareStatement(sql.toString())) {
+            for (int i = 0; i < params.size(); i++) {
+                ps.setObject(i + 1, params.get(i));
+            }
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    Map<String, Object> row = new HashMap<>();
+                    row.put("entity_id", rs.getString("entity_id"));
+                    row.put("transport_mode", rs.getString("transport_mode"));
+                    row.put("name", rs.getString("name"));
+                    row.put("color", rs.getObject("color"));
+                    row.put("file_path", rs.getString("file_path"));
+                    row.put("last_updated", rs.getLong("last_updated"));
+                    if (includePayload) {
+                        String payload = rs.getString("payload");
+                        if (payload != null) {
+                            try {
+                                JsonNode node = JSON_MAPPER.readTree(payload);
+                                row.put("payload", node);
+                            } catch (IOException e) {
+                                row.put("payload", payload);
+                            }
+                        } else {
+                            row.put("payload", null);
+                        }
+                    }
+                    rows.add(row);
+                }
+            }
+        }
+
+        Map<String, Object> result = new HashMap<>();
+        result.put("rows", rows);
+        result.put("limit", limit);
+        result.put("offset", offset);
+        result.put("truncated", rows.size() >= limit);
+        result.put("category", category.getKey());
+        return result;
+    }
+
     private Map<String, Object> executeSelectSql(String sql, Integer maxRows) throws SQLException {
         if (sql == null || sql.trim().isEmpty()) {
             throw new IllegalArgumentException("sql is required");
@@ -2257,6 +2378,36 @@ public class SocketServerManager {
         public void setSql(String sql) { this.sql = sql; }
         public Integer getMaxRows() { return maxRows; }
         public void setMaxRows(Integer maxRows) { this.maxRows = maxRows; }
+    }
+
+    public static class MtrQueryRequest extends AuthOnlyRequest {
+        private String category;
+        private String dimensionContext;
+        private Map<String, Object> filters;
+        private Integer limit;
+        private Integer offset;
+        private String orderBy;
+        private String orderDir;
+        private Boolean includePayload;
+
+        public MtrQueryRequest() {}
+
+        public String getCategory() { return category; }
+        public void setCategory(String category) { this.category = category; }
+        public String getDimensionContext() { return dimensionContext; }
+        public void setDimensionContext(String dimensionContext) { this.dimensionContext = dimensionContext; }
+        public Map<String, Object> getFilters() { return filters; }
+        public void setFilters(Map<String, Object> filters) { this.filters = filters; }
+        public Integer getLimit() { return limit; }
+        public void setLimit(Integer limit) { this.limit = limit; }
+        public Integer getOffset() { return offset; }
+        public void setOffset(Integer offset) { this.offset = offset; }
+        public String getOrderBy() { return orderBy; }
+        public void setOrderBy(String orderBy) { this.orderBy = orderBy; }
+        public String getOrderDir() { return orderDir; }
+        public void setOrderDir(String orderDir) { this.orderDir = orderDir; }
+        public Boolean getIncludePayload() { return includePayload; }
+        public void setIncludePayload(Boolean includePayload) { this.includePayload = includePayload; }
     }
 
     public static class PlayerBalanceRequest implements AuthPayload {

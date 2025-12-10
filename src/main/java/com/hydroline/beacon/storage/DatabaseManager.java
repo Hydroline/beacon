@@ -154,8 +154,145 @@ public class DatabaseManager {
                         "player_uuid TEXT PRIMARY KEY," +
                         "raw_json TEXT NOT NULL," +
                         "cached_at INTEGER NOT NULL" +
-                        ")"
+                    ")"
                 );
+
+                statement.executeUpdate(
+                    "CREATE TABLE IF NOT EXISTS mtr_world_files (" +
+                        "id INTEGER PRIMARY KEY AUTOINCREMENT," +
+                        "file_path TEXT NOT NULL UNIQUE," +
+                        "category TEXT NOT NULL," +
+                        "dimension_context TEXT NOT NULL," +
+                        "namespace TEXT," +
+                        "dimension TEXT," +
+                        "last_modified INTEGER NOT NULL," +
+                        "last_processed INTEGER," +
+                        "last_seen_at INTEGER NOT NULL," +
+                        "processed INTEGER NOT NULL DEFAULT 0" +
+                    ")"
+                );
+
+                statement.executeUpdate(
+                    "CREATE TABLE IF NOT EXISTS mtr_depots (" +
+                        "id INTEGER PRIMARY KEY AUTOINCREMENT," +
+                        "dimension_context TEXT NOT NULL," +
+                        "entity_id TEXT NOT NULL," +
+                        "transport_mode TEXT," +
+                        "name TEXT," +
+                        "color INTEGER," +
+                        "file_path TEXT NOT NULL," +
+                        "payload TEXT NOT NULL," +
+                        "last_updated INTEGER NOT NULL," +
+                        "UNIQUE(dimension_context, entity_id)" +
+                    ")"
+                );
+
+                statement.executeUpdate(
+                    "CREATE TABLE IF NOT EXISTS mtr_platforms (" +
+                        "id INTEGER PRIMARY KEY AUTOINCREMENT," +
+                        "dimension_context TEXT NOT NULL," +
+                        "entity_id TEXT NOT NULL," +
+                        "transport_mode TEXT," +
+                        "name TEXT," +
+                        "color INTEGER," +
+                        "file_path TEXT NOT NULL," +
+                        "payload TEXT NOT NULL," +
+                        "last_updated INTEGER NOT NULL," +
+                        "UNIQUE(dimension_context, entity_id)" +
+                    ")"
+                );
+
+                statement.executeUpdate(
+                    "CREATE TABLE IF NOT EXISTS mtr_rails (" +
+                        "id INTEGER PRIMARY KEY AUTOINCREMENT," +
+                        "dimension_context TEXT NOT NULL," +
+                        "entity_id TEXT NOT NULL," +
+                        "transport_mode TEXT," +
+                        "name TEXT," +
+                        "color INTEGER," +
+                        "file_path TEXT NOT NULL," +
+                        "payload TEXT NOT NULL," +
+                        "last_updated INTEGER NOT NULL," +
+                        "UNIQUE(dimension_context, entity_id)" +
+                    ")"
+                );
+
+                statement.executeUpdate(
+                    "CREATE TABLE IF NOT EXISTS mtr_routes (" +
+                        "id INTEGER PRIMARY KEY AUTOINCREMENT," +
+                        "dimension_context TEXT NOT NULL," +
+                        "entity_id TEXT NOT NULL," +
+                        "transport_mode TEXT," +
+                        "name TEXT," +
+                        "color INTEGER," +
+                        "file_path TEXT NOT NULL," +
+                        "payload TEXT NOT NULL," +
+                        "last_updated INTEGER NOT NULL," +
+                        "UNIQUE(dimension_context, entity_id)" +
+                    ")"
+                );
+
+                statement.executeUpdate(
+                    "CREATE TABLE IF NOT EXISTS mtr_signal_blocks (" +
+                        "id INTEGER PRIMARY KEY AUTOINCREMENT," +
+                        "dimension_context TEXT NOT NULL," +
+                        "entity_id TEXT NOT NULL," +
+                        "transport_mode TEXT," +
+                        "name TEXT," +
+                        "color INTEGER," +
+                        "file_path TEXT NOT NULL," +
+                        "payload TEXT NOT NULL," +
+                        "last_updated INTEGER NOT NULL," +
+                        "UNIQUE(dimension_context, entity_id)" +
+                    ")"
+                );
+
+                statement.executeUpdate(
+                    "CREATE TABLE IF NOT EXISTS mtr_stations (" +
+                        "id INTEGER PRIMARY KEY AUTOINCREMENT," +
+                        "dimension_context TEXT NOT NULL," +
+                        "entity_id TEXT NOT NULL," +
+                        "transport_mode TEXT," +
+                        "name TEXT," +
+                        "color INTEGER," +
+                        "file_path TEXT NOT NULL," +
+                        "payload TEXT NOT NULL," +
+                        "last_updated INTEGER NOT NULL," +
+                        "UNIQUE(dimension_context, entity_id)" +
+                    ")"
+                );
+
+                statement.executeUpdate(
+                    "CREATE TABLE IF NOT EXISTS mtr_entity_diffs (" +
+                        "id INTEGER PRIMARY KEY AUTOINCREMENT," +
+                        "category TEXT NOT NULL," +
+                        "dimension_context TEXT NOT NULL," +
+                        "entity_id TEXT NOT NULL," +
+                        "change_type TEXT NOT NULL CHECK (change_type IN ('added','updated','deleted'))," +
+                        "before_payload TEXT," +
+                        "after_payload TEXT," +
+                        "file_path TEXT," +
+                        "processed_at INTEGER NOT NULL" +
+                    ")"
+                );
+
+                statement.executeUpdate(
+                    "CREATE TABLE IF NOT EXISTS mtr_dimension_versions (" +
+                        "dimension_context TEXT PRIMARY KEY," +
+                        "namespace TEXT," +
+                        "dimension TEXT," +
+                        "last_updated INTEGER NOT NULL" +
+                    ")"
+                );
+
+                statement.executeUpdate("CREATE INDEX IF NOT EXISTS idx_mtr_world_files_category ON mtr_world_files(category)");
+                statement.executeUpdate("CREATE INDEX IF NOT EXISTS idx_mtr_world_files_dimension ON mtr_world_files(dimension_context)");
+                statement.executeUpdate("CREATE INDEX IF NOT EXISTS idx_mtr_depots_dimension ON mtr_depots(dimension_context)");
+                statement.executeUpdate("CREATE INDEX IF NOT EXISTS idx_mtr_platforms_dimension ON mtr_platforms(dimension_context)");
+                statement.executeUpdate("CREATE INDEX IF NOT EXISTS idx_mtr_rails_dimension ON mtr_rails(dimension_context)");
+                statement.executeUpdate("CREATE INDEX IF NOT EXISTS idx_mtr_routes_dimension ON mtr_routes(dimension_context)");
+                statement.executeUpdate("CREATE INDEX IF NOT EXISTS idx_mtr_signal_blocks_dimension ON mtr_signal_blocks(dimension_context)");
+                statement.executeUpdate("CREATE INDEX IF NOT EXISTS idx_mtr_stations_dimension ON mtr_stations(dimension_context)");
         }
     }
 }
