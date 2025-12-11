@@ -590,12 +590,12 @@
 
 - 说明：
   - `category` 必填，取值为 `depots`/`platforms`/`rails`/`routes`/`signal-blocks`/`stations`，内部会切换到对应 `mtr_xxx` 表。
-  - `filters` 支持的字段为 `entity_id`、`transport_mode`、`name`、`color`、`file_path`（全部为精确匹配）。其它字段会被忽略。
+  - `filters` 支持的字段因 category 而异：`depots`/`platforms`/`routes`/`stations` 提供 `entity_id`、`transport_mode`、`name`、`color`、`file_path`；`signal-blocks` 仅提供 `entity_id`、`transport_mode`、`color`、`file_path`；`rails` 只提供 `entity_id` 和 `file_path`。其它字段会被忽略。
   - `dimensionContext` 可选，若提供会额外按 `dimension_context` 精确匹配，等效于限定 namespace + dimension。
   - `limit` 默认 100，最大 500；`offset` 默认 0。`truncated: true` 表示还有更多满足条件的行（GraphQL 分页可据此决定是否继续查询）。
-  - `orderBy` 仅允许 `entity_id`/`name`/`color`/`last_updated`，默认 `last_updated`，`orderDir` 允许 `ASC`/`DESC`（默认为 `DESC`）。
+  - `orderBy` 仅允许在对应 category 中真实存在的列：`rails` 限定为 `entity_id`/`last_updated`，`signal-blocks` 可用 `entity_id`/`color`/`last_updated`，其它 category 可额外使用 `name`/`color`。默认 `last_updated`，`orderDir` 允许 `ASC`/`DESC`（默认为 `DESC`）。
   - `includePayload` 控制是否在返回结果中携带 `payload`（默认 `true`）。`payload` 为 JSON 结构，由插件在扫描时写入，GraphQL 可直接当作对象使用。
-  - `rows` 中的 `last_updated` 对应数据库更新（进程最后一次扫描）时间戳。
+- `rows` 中的 `last_updated` 对应数据库更新（进程最后一次扫描）时间戳。`rails` 的行只会返回 `entity_id`、`file_path`、`last_updated` 以及 `payload`，不会再出现 `transport_mode`/`name`/`color`；`signal-blocks` 的行也不再包含 `name`。
 
 18. get_mtr_railway_snapshot（MTR Railway Data）
     > 此事件需要 Beacon Provider 已配置

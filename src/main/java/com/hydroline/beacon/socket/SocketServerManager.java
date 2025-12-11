@@ -2012,8 +2012,15 @@ public class SocketServerManager {
 
         boolean includePayload = request.getIncludePayload() == null || request.getIncludePayload();
 
-        StringBuilder sql = new StringBuilder("SELECT entity_id, transport_mode, name, color, file_path, payload, last_updated FROM ");
-        sql.append(category.getTableName()).append(" WHERE 1=1");
+        List<String> selectColumns = new ArrayList<>();
+        selectColumns.add("entity_id");
+        selectColumns.addAll(category.getMetadataColumns());
+        selectColumns.add("file_path");
+        selectColumns.add("payload");
+        selectColumns.add("last_updated");
+        StringBuilder sql = new StringBuilder("SELECT ");
+        sql.append(String.join(", ", selectColumns));
+        sql.append(" FROM ").append(category.getTableName()).append(" WHERE 1=1");
         List<Object> params = new ArrayList<>();
 
         if (request.getDimensionContext() != null && !request.getDimensionContext().trim().isEmpty()) {
@@ -2048,9 +2055,9 @@ public class SocketServerManager {
                 while (rs.next()) {
                     Map<String, Object> row = new HashMap<>();
                     row.put("entity_id", rs.getString("entity_id"));
-                    row.put("transport_mode", rs.getString("transport_mode"));
-                    row.put("name", rs.getString("name"));
-                    row.put("color", rs.getObject("color"));
+                    for (String column : category.getMetadataColumns()) {
+                        row.put(column, rs.getObject(column));
+                    }
                     row.put("file_path", rs.getString("file_path"));
                     row.put("last_updated", rs.getLong("last_updated"));
                     if (includePayload) {

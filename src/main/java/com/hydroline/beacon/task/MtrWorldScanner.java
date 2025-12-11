@@ -367,6 +367,9 @@ public class MtrWorldScanner {
         String transportMode = toString(record.get("transport_mode"));
         String name = toString(record.get("name"));
         Long color = toLong(record.get("color"));
+        boolean hasTransportMode = category.hasTransportModeColumn();
+        boolean hasName = category.hasNameColumn();
+        boolean hasColor = category.hasColorColumn();
 
         String existingPayload = null;
         try (PreparedStatement select = connection.prepareStatement(
@@ -381,23 +384,60 @@ public class MtrWorldScanner {
             }
         }
 
+        List<String> insertColumns = new ArrayList<>();
+        insertColumns.add("dimension_context");
+        insertColumns.add("entity_id");
+        if (hasTransportMode) {
+            insertColumns.add("transport_mode");
+        }
+        if (hasName) {
+            insertColumns.add("name");
+        }
+        if (hasColor) {
+            insertColumns.add("color");
+        }
+        insertColumns.add("file_path");
+        insertColumns.add("payload");
+        insertColumns.add("last_updated");
+
+        List<String> setClauses = new ArrayList<>();
+        if (hasTransportMode) {
+            setClauses.add("transport_mode = ?");
+        }
+        if (hasName) {
+            setClauses.add("name = ?");
+        }
+        if (hasColor) {
+            setClauses.add("color = ?");
+        }
+        setClauses.add("file_path = ?");
+        setClauses.add("payload = ?");
+        setClauses.add("last_updated = ?");
+
         if (existingPayload == null) {
+            String placeholders = String.join(", ", Collections.nCopies(insertColumns.size(), "?"));
             try (PreparedStatement insert = connection.prepareStatement(
-                    "INSERT INTO " + table + " (dimension_context, entity_id, transport_mode, name, color, file_path, payload, last_updated) " +
-                            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+                    "INSERT INTO " + table + " (" + String.join(", ", insertColumns) + ") VALUES (" + placeholders + ")"
             )) {
-                insert.setString(1, file.dimensionContext);
-                insert.setString(2, entityId);
-                insert.setString(3, transportMode);
-                insert.setString(4, name);
-                if (color != null) {
-                    insert.setLong(5, color);
-                } else {
-                    insert.setNull(5, java.sql.Types.INTEGER);
+                int idx = 1;
+                insert.setString(idx++, file.dimensionContext);
+                insert.setString(idx++, entityId);
+                if (hasTransportMode) {
+                    insert.setString(idx++, transportMode);
                 }
-                insert.setString(6, file.filePath);
-                insert.setString(7, payload);
-                insert.setLong(8, scannedAt);
+                if (hasName) {
+                    insert.setString(idx++, name);
+                }
+                if (hasColor) {
+                    if (color != null) {
+                        insert.setLong(idx++, color);
+                    } else {
+                        insert.setNull(idx++, java.sql.Types.INTEGER);
+                    }
+                }
+                insert.setString(idx++, file.filePath);
+                insert.setString(idx++, payload);
+                insert.setLong(idx++, scannedAt);
                 insert.executeUpdate();
             }
             insertDiff(connection, category.getKey(), file.dimensionContext, entityId, "added", null, payload, file.filePath, scannedAt);
@@ -406,21 +446,27 @@ public class MtrWorldScanner {
 
         if (!existingPayload.equals(payload)) {
             try (PreparedStatement update = connection.prepareStatement(
-                    "UPDATE " + table + " SET transport_mode = ?, name = ?, color = ?, file_path = ?, payload = ?, last_updated = ? " +
-                            "WHERE dimension_context = ? AND entity_id = ?"
+                    "UPDATE " + table + " SET " + String.join(", ", setClauses) + " WHERE dimension_context = ? AND entity_id = ?"
             )) {
-                update.setString(1, transportMode);
-                update.setString(2, name);
-                if (color != null) {
-                    update.setLong(3, color);
-                } else {
-                    update.setNull(3, java.sql.Types.INTEGER);
+                int idx = 1;
+                if (hasTransportMode) {
+                    update.setString(idx++, transportMode);
                 }
-                update.setString(4, file.filePath);
-                update.setString(5, payload);
-                update.setLong(6, scannedAt);
-                update.setString(7, file.dimensionContext);
-                update.setString(8, entityId);
+                if (hasName) {
+                    update.setString(idx++, name);
+                }
+                if (hasColor) {
+                    if (color != null) {
+                        update.setLong(idx++, color);
+                    } else {
+                        update.setNull(idx++, java.sql.Types.INTEGER);
+                    }
+                }
+                update.setString(idx++, file.filePath);
+                update.setString(idx++, payload);
+                update.setLong(idx++, scannedAt);
+                update.setString(idx++, file.dimensionContext);
+                update.setString(idx++, entityId);
                 update.executeUpdate();
             }
             insertDiff(connection, category.getKey(), file.dimensionContext, entityId, "updated", existingPayload, payload, file.filePath, scannedAt);
