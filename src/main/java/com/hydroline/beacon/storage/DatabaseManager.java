@@ -367,8 +367,6 @@ public class DatabaseManager {
             long now = System.currentTimeMillis();
             statement.setInt(1, version);
             statement.setLong(2, now);
-            statement.setInt(3, version);
-            statement.setLong(4, now);
             statement.executeUpdate();
         }
     }
