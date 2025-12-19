@@ -374,6 +374,40 @@ async function runMtrLogTests({
       sessionsByPlayer
     );
   }
+
+  const needle = "-1325051682189213509";
+  const needleSql = needle.replace(/'/g, "''");
+  const executeSql = await emitWithAck(
+    socket,
+    "execute_sql",
+    {
+      key,
+      sql: `SELECT COUNT(*) AS total\nFROM mtr_logs\nWHERE COALESCE(entry_id, '') LIKE '%${needleSql}%'`,
+      maxRows: 10,
+    },
+    "execute_sql(mtr_logs_count)"
+  );
+  await writeJson(
+    outDir,
+    `execute_sql_mtr_logs_count_${sanitize(needle)}.json`,
+    executeSql
+  );
+
+  const executeSqlRow = await emitWithAck(
+    socket,
+    "execute_sql",
+    {
+      key,
+      sql: `SELECT *\nFROM mtr_logs\nWHERE (\n  CAST(id AS TEXT) LIKE '%${needleSql}%'\n  OR COALESCE(timestamp, '') LIKE '%${needleSql}%'\n  OR COALESCE(player_name, '') LIKE '%${needleSql}%'\n  OR COALESCE(player_uuid, '') LIKE '%${needleSql}%'\n  OR COALESCE(class_name, '') LIKE '%${needleSql}%'\n  OR COALESCE(entry_id, '') LIKE '%${needleSql}%'\n  OR COALESCE(entry_name, '') LIKE '%${needleSql}%'\n  OR COALESCE(position, '') LIKE '%${needleSql}%'\n  OR COALESCE(change_type, '') LIKE '%${needleSql}%'\n  OR COALESCE(old_data, '') LIKE '%${needleSql}%'\n  OR COALESCE(new_data, '') LIKE '%${needleSql}%'\n  OR COALESCE(source_file_path, '') LIKE '%${needleSql}%'\n  OR CAST(source_line AS TEXT) LIKE '%${needleSql}%'\n  OR COALESCE(dimension_context, '') LIKE '%${needleSql}%'\n)\nORDER BY id DESC\nLIMIT 1`,
+      maxRows: 1,
+    },
+    "execute_sql(mtr_logs_row)"
+  );
+  await writeJson(
+    outDir,
+    `execute_sql_mtr_logs_row_${sanitize(needle)}.json`,
+    executeSqlRow
+  );
 }
 
 async function runMtrTests({ socket, key, outDir, dimension }) {

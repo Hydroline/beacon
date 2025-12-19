@@ -46,6 +46,7 @@ BEACON_PORT=48080 BEACON_KEY=... node test-socketio.js mtr         # 仅运行 M
 - `get_mtr_log_detail`
 - `get_player_sessions`（分页、按日、JOIN only、按玩家）
 - `list_player_identities`
+- `execute_sql`（只读 SQL：SELECT/PRAGMA）
 
 所有响应都会写入 `output/*.json`，文件名包含事件名或参数摘要，方便后续 diff。
 
