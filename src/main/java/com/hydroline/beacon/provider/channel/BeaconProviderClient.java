@@ -34,7 +34,7 @@ public final class BeaconProviderClient {
     private static final int PROTOCOL_VERSION = 1;
     private static final int CONNECT_TIMEOUT_MILLIS = 5000;
     private static final long MAX_RECONNECT_DELAY_MS = 30_000L;
-    private static final Path GATEWAY_CONFIG_PATH = Paths.get("config", "hydroline", "beacon-provider.json");
+    private static final Path GATEWAY_CONFIG_PATH = Paths.get("config", "beacon-provider", "beacon-provider.json");
 
     private final BeaconPlugin plugin;
     private final ObjectMapper mapper = new ObjectMapper();

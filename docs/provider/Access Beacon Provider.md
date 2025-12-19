@@ -4,7 +4,7 @@
 
 ## 1. Netty Gateway 初始化
 
-- Forge/Fabric 端自 0.1.6 起默认开启 Netty Gateway（参见 Provider 仓库 `docs/Netty Gateway.md`），并在 `config/hydroline/beacon-provider.json` 输出监听地址、端口与 `authToken`。
+- Forge/Fabric 端自 0.1.6 起默认开启 Netty Gateway（参见 Provider 仓库 `docs/Netty Gateway.md`），并在 `config/beacon-provider/beacon-provider.json` 输出监听地址、端口与 `authToken`。
 - Bukkit 插件会在 `onEnable` 时读取同一份配置文件，主动建立 TCP 连接并完成握手，无需玩家在线也能调用 action。若 `listenPort <= 0` 或文件缺失，客户端会跳过连接并在日志中提示。
 - **配置要求**：首次运行请在 Provider 侧修改 `authToken`，然后将相同文件部署到 Bukkit 服务器根目录（通常与 Forge/Mohist 共用目录即可）。
 - 握手成功后日志会输出：`[Beacon] Beacon Gateway connected (connectionId=..., modVersion=...)` 和 `Beacon Provider channel ready, latency=XXms`。
@@ -88,6 +88,6 @@ client.sendAction(BeaconProviderActions.listNodesPaginated("minecraft:overworld"
 
 ## 5. 注意事项
 
-- Gateway 配置位于 `config/hydroline/beacon-provider.json`，若 Provider 尚未生成该文件，Bukkit 客户端会在日志中提示并跳过连接。请确保两端共享同一份配置并修改 `authToken`。
+- Gateway 配置位于 `config/beacon-provider/beacon-provider.json`，若 Provider 尚未生成该文件，Bukkit 客户端会在日志中提示并跳过连接。请确保两端共享同一份配置并修改 `authToken`。
 - 旧版 Plugin Messaging 已废弃；在 `listenPort > 0` 的情况下 Bukkit 不再注册 `hydroline:beacon_provider` Channel。
 - 如需排查连接问题，可查看 Bukkit 控制台是否反复输出 “Beacon Gateway connection lost…”，或检查 Provider 端的 `Netty Gateway` 日志。
