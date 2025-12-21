@@ -43,7 +43,7 @@ public class NbtIdentityScanner {
                 if (files == null) continue;
                 for (File f : files) {
                     String uuid = stripDat(f.getName());
-                    if (uuid == null || uuid.length() < 32) continue;
+                    if (uuid == null || !isValidPlayerDataUuid(uuid)) continue;
                     filesProcessed++;
                     String playerName = null;
                     Long firstPlayed = null;
@@ -162,5 +162,11 @@ public class NbtIdentityScanner {
             return name.substring(0, name.length() - 4);
         }
         return null;
+    }
+
+    private boolean isValidPlayerDataUuid(String uuid) {
+        // Minecraft playerdata filenames are the standard UUID string with 4 hyphens (length=36)
+        if (uuid.length() != 36) return false;
+        return uuid.matches("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$");
     }
 }
