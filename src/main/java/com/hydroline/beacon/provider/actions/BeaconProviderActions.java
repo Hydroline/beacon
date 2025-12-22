@@ -3,14 +3,16 @@ package com.hydroline.beacon.provider.actions;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.hydroline.beacon.provider.actions.dto.BeaconPingResponse;
+import com.hydroline.beacon.provider.actions.dto.MtrAllStationSchedulesResponse;
 import com.hydroline.beacon.provider.actions.dto.MtrDepotListResponse;
-import com.hydroline.beacon.provider.actions.dto.MtrFareAreaListResponse;
 import com.hydroline.beacon.provider.actions.dto.MtrDepotTrainsResponse;
+import com.hydroline.beacon.provider.actions.dto.MtrFareAreaListResponse;
 import com.hydroline.beacon.provider.actions.dto.MtrNetworkOverviewResponse;
 import com.hydroline.beacon.provider.actions.dto.MtrNodePageResponse;
 import com.hydroline.beacon.provider.actions.dto.MtrRouteDetailResponse;
 import com.hydroline.beacon.provider.actions.dto.MtrRouteTrainsResponse;
 import com.hydroline.beacon.provider.actions.dto.MtrStationListResponse;
+import com.hydroline.beacon.provider.actions.dto.MtrStationScheduleResponse;
 import com.hydroline.beacon.provider.actions.dto.MtrStationTimetableResponse;
 import com.hydroline.beacon.provider.channel.BeaconActionCall;
 
@@ -117,6 +119,28 @@ public final class BeaconProviderActions {
             payload.put("dimension", dimension);
         }
         return BeaconActionCall.of("mtr:get_railway_snapshot", payload, ObjectNode.class);
+    }
+
+    public static BeaconActionCall<MtrStationScheduleResponse> getStationSchedule(String dimension,
+            long stationId,
+            Long platformId) {
+        ObjectNode payload = objectNode();
+        payload.put("stationId", stationId);
+        if (!isNullOrEmpty(dimension)) {
+            payload.put("dimension", dimension);
+        }
+        if (platformId != null) {
+            payload.put("platformId", platformId);
+        }
+        return BeaconActionCall.of("mtr:get_station_schedule", payload, MtrStationScheduleResponse.class);
+    }
+
+    public static BeaconActionCall<MtrAllStationSchedulesResponse> getAllStationSchedules(String dimension) {
+        ObjectNode payload = objectNode();
+        if (!isNullOrEmpty(dimension)) {
+            payload.put("dimension", dimension);
+        }
+        return BeaconActionCall.of("mtr:get_all_station_schedules", payload, MtrAllStationSchedulesResponse.class);
     }
 
     private static ObjectNode objectNode() {

@@ -597,7 +597,148 @@
   - `includePayload` 控制是否在返回结果中携带 `payload`（默认 `true`）。`payload` 为 JSON 结构，由插件在扫描时写入，GraphQL 可直接当作对象使用。
 - `rows` 中的 `last_updated` 对应数据库更新（进程最后一次扫描）时间戳。`rails` 的行只会返回 `entity_id`、`file_path`、`last_updated` 以及 `payload`，不会再出现 `transport_mode`/`name`/`color`；`signal-blocks` 的行也不再包含 `name`。
 
-18. get_mtr_railway_snapshot（MTR Railway Data）
+18. get_mtr_station_schedule（MTR 站点时刻表查询）
+
+- 描述：透传 Beacon Provider 的 `mtr:get_station_schedule`，返回单个站点（可选指定平台）的下一批时刻表 `entries`，适合作为 GraphQL 多表联查或时刻表视图的实时数据源。
+- 请求：`{ "key": "<key>", "stationId": -8032361298358188000, "dimension": "minecraft:overworld", "platformId": -4037996040742135300 }`（`dimension`/`platformId` 可选；`stationId` 必填，`platformId` 可配合 `dimension` 精准到某个平台）。
+- ACK 成功示例（示意）：
+  - 完整样例输出可参见 `../hydroline-beacon-provider/tests/output/mtr_station_schedule_minecraft_overworld_station_-4711970808237617986.json`。
+  - `payload.stationId`、`payload.dimension`、`payload.timestamp` 与 Provider 快照同步；`timetables[*].platforms[*].entries` 均为 Provider 原始 `ScheduleEntry` 信息。
+- 数据结构（TypeScript 友好示意）：
+
+```ts
+type GetMtrStationScheduleAck = {
+  success: boolean;
+  result: "OK" | "BUSY" | "INVALID_PAYLOAD";
+  message: string;
+  request_id: string;
+  payload: {
+    timestamp: number;
+    dimension?: string;
+    stationId: number;
+    stationName?: string;
+    timetables: Array<{
+      dimension?: string;
+      platforms: Array<{
+        platformId: number;
+        platformName?: string;
+        entries: Array<{
+          routeId: number;
+          routeName?: string;
+          route?: string;
+          color?: number;
+          destination?: string;
+          circular?: string;
+          arrivalMillis: number;
+          trainCars: number;
+          currentStationIndex: number;
+          delayMillis?: number;
+        }>;
+      }>;
+    }>;
+  };
+};
+```
+
+```json
+{
+  "success": true,
+  "result": "OK",
+  "message": "",
+  "request_id": "xr5ey2v8q3",
+  "payload": {
+    "timestamp": 1766417629386,
+    "dimension": "minecraft:overworld",
+    "stationId": -8032361298358188000,
+    "stationName": "旧巷北站|Jiuxiangbei Railway Station",
+    "timetables": [
+      {
+        "dimension": "minecraft:overworld",
+        "platforms": [
+          {
+            "platformId": -4037996040742135300,
+            "platformName": "7",
+            "entries": [
+              {
+                "routeId": 8973030032880211000,
+                "routeName": "G294||服铁旧巷局担当",
+                "route": "G294 开往|G294 To",
+                "color": 49151,
+                "arrivalMillis": 1766420219900,
+                "trainCars": 8,
+                "currentStationIndex": 0
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+- 说明：
+  - `success` 由 Beacon Provider 的 `ResultCode` 映射；只有 `ResultCode.OK`（`result: "OK"`）会返回缓存数据，其他值（如 `BUSY` / `INVALID_PAYLOAD`）只会有空 `payload`/`timetables`，`message` 中会带说明（例如 `station timetable unavailable`）。
+  - `payload.timestamp` 为 Provider 扫描写入 SQLite 时的毫秒时间戳，可用于判断数据是否过期；`payload.dimension` 反映当前快照的维度（若请求未指定 `dimension`，可能默认取某个维度）。
+  - `timetables` 数组包含一个或多个 `dimension` 条目，每条的 `platforms` 保留 MTR 原始写入顺序。每个平台的 `entries` 数组元素含 `routeId`/`routeName`/`route`（例如 `G23 To`）/`color`（十进制）/`destination`/`circular`/`arrivalMillis`/`trainCars`/`currentStationIndex`，如有延误还会出现 `delayMillis`；客户端可直接用于渲染或者多表连接。
+  - `platformId` 可选；若提供，只返回对应平台的 `entries`，否则返回该站所有平台数据。
+  - 此事件与 `get_mtr_all_station_schedules` 共用 Beacon Provider 的串行队列，默认每次请求间隔 `beacon.scheduleRateLimitMs`（缺省 400ms），队列最大等待 64 个请求，超过 `beacon.scheduleRequestTimeoutMs`（缺省 30000ms）会收到 `result: "BUSY"`，请在客户端捕捉并退避再试。
+
+19. get_mtr_all_station_schedules（MTR 全维度时刻表）
+
+- 描述：透传 `mtr:get_all_station_schedules`，一次性获取当前已注册维度的所有站点、站台与 `entries`，方便后台服务做统一缓存/GraphQL 聚合。
+- 请求：`{ "key": "<key>", "dimension": "minecraft:overworld" }`（维度参数可选，不传则遍历所有已注册维度）。
+- ACK 成功示例片段（完整输出可见 `tests/output/mtr_all_station_schedules_minecraft_overworld.json`）：
+  - 类型结构示意与单站类似，只是 `dimensions` 数组代替 `timetables`，每个 `stations[*]` 包含 `platforms`。
+
+```json
+{
+  "success": true,
+  "result": "OK",
+  "message": "",
+  "request_id": "twq3phd4c8",
+  "payload": {
+    "timestamp": 1766417629386,
+    "dimension": "minecraft:overworld",
+    "dimensions": [
+      {
+        "dimension": "minecraft:overworld",
+        "stations": [
+          {
+            "stationId": -8032361298358188000,
+            "stationName": "旧巷北站|Jiuxiangbei Railway Station",
+            "platforms": [
+              {
+                "platformId": -4037996040742135300,
+                "platformName": "7",
+                "entries": [
+                  {
+                    "routeId": 8973030032880211000,
+                    "routeName": "G294||服铁旧巷局担当",
+                    "route": "G294 开往|G294 To",
+                    "color": 49151,
+                    "arrivalMillis": 1766420219900,
+                    "trainCars": 8,
+                    "currentStationIndex": 0
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+- 说明：
+  - `dimensions` 数组中的每项等价于 `mtr:get_station_schedule` 返回的 `timetables` 条目，`stations` 中的 `platforms` 与 `entries` 结构一致（同样保留原始顺序，并包含 `routeId`/`routeName`/`route`/`destination`/`circular`/`arrivalMillis`/`trainCars`/`currentStationIndex`/`delayMillis`）。
+  - `timestamp` 表示此数据写入缓存的时间；若请求指定 `dimension`，则只有对应维度会被填充。
+  - 返回的数据量可能较大，客户端可以只保留 `stations` 与 `platforms` 中需要的部分并配合 `payload.timestamp` 做缓存更新策略。
+  - 同样受限于 Beacon Provider 的串行队列与节流配置，遇到 `result: "BUSY"` 或 `message: "station timetable unavailable"` 时请稍后重试。
+
+20. get_mtr_railway_snapshot（MTR Railway Data）
     > 此事件需要 Beacon Provider 已配置
 
 - 透传 `mtr:get_railway_snapshot`，将 Provider 返回的 Base64 MessagePack 快照解码并过滤，只把 `stations`/`platforms`/`routes`/`depots` 四个结构返回给客户端，可直接用于后台 GraphQL 多表联查。
@@ -700,7 +841,7 @@ type RailwayDataPayload = {
   - `stations/platforms/routes/depots` 的每个元素都对应 `SerializedDataBase` 的字段（如 `name`, `color`, `route_ids`, `exits`），客户端可直接使用这些结构或者根据 `id` 交叉引用。
   - `payload.last_deployed` 指示整个维度快照的时间戳；如果客户端存储了先前的 `last_deployed`，只有当新的时间戳更大时才需要更新缓存或重新绘制拓扑。
 
-19. execute_sql（GraphQL/运维直通）
+21. execute_sql（GraphQL/运维直通）
 
 - 描述：管理员用只读 SQL 执行入口，允许直接发出单条 `SELECT` / `PRAGMA` 语句，便于 GraphQL 代理或应急排查。
 - 请求：

@@ -6,23 +6,26 @@ import dotenv from "dotenv";
 dotenv.config();
 
 const KNOWN_CATEGORIES = ["core", "mtr"];
-
-function requireEnv(name) {
-  const value = process.env[name];
-  if (!value) {
-    throw new Error(`Missing required environment variable: ${name}`);
-  }
-  return value;
-}
+const DEFAULT_BEACON_PORT = "1145";
+const DEFAULT_BEACON_KEY =
+  "jU93ErhC1voM6UZgWAQbk0WSksRRI7Q895n2sCgAA2EtbYGnrHKdMhzzFu9TBv5l";
 
 async function main() {
   const host = process.env.BEACON_HOST || "127.0.0.1";
-  const port = requireEnv("BEACON_PORT");
-  const key = requireEnv("BEACON_KEY");
+  const port = process.env.BEACON_PORT || DEFAULT_BEACON_PORT;
+  const key = process.env.BEACON_KEY || DEFAULT_BEACON_KEY;
   const playerUuid = process.env.BEACON_PLAYER_UUID;
   const playerName = process.env.BEACON_PLAYER_NAME;
   const mtrDimension =
     process.env.BEACON_MTR_DIMENSION || "minecraft:overworld";
+  const sampleStationId =
+    process.env.BEACON_MTR_STATION_ID ||
+    process.env.SAMPLE_MTR_STATION_ID ||
+    "3407626934243632146";
+  const sampleStationDimension =
+    process.env.BEACON_MTR_STATION_DIMENSION ||
+    process.env.SAMPLE_MTR_STATION_DIMENSION ||
+    mtrDimension;
   const outDir =
     process.env.OUTPUT_DIR || path.resolve(process.cwd(), "output");
   await prepareOutputDir(outDir);
@@ -63,6 +66,8 @@ async function main() {
             key,
             outDir,
             dimension: mtrDimension,
+            sampleStationId,
+            sampleStationDimension,
           });
         }
       }
@@ -97,6 +102,10 @@ async function prepareOutputDir(dir) {
 
 function sanitize(name) {
   return (name || "").replace(/[^a-zA-Z0-9_.-]/g, "_");
+}
+
+function dimensionToSlug(value) {
+  return String(value || "unknown").replace(/[^0-9A-Za-z_-]/g, "_");
 }
 
 async function writeJson(outDir, fileName, data) {
@@ -410,7 +419,14 @@ async function runMtrLogTests({
   );
 }
 
-async function runMtrTests({ socket, key, outDir, dimension }) {
+async function runMtrTests({
+  socket,
+  key,
+  outDir,
+  dimension,
+  sampleStationId,
+  sampleStationDimension,
+}) {
   console.log("\n=== Running MTR events ===");
 
   const ping = await emitWithAck(
@@ -443,6 +459,22 @@ async function runMtrTests({ socket, key, outDir, dimension }) {
       payload: snapshot?.payload ?? null,
     });
   }
+
+  const stationSchedule = await emitWithAck(
+    socket,
+    "get_mtr_station_schedule",
+    {
+      key,
+      stationId: sampleStationId,
+      dimension: sampleStationDimension,
+    },
+    "get_mtr_station_schedule"
+  );
+  await writeJson(
+    outDir,
+    `mtr_station_schedule_${sanitize(sampleStationId)}.json`,
+    stationSchedule
+  );
 }
 
 main().catch((err) => {

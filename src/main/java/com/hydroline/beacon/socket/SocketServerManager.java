@@ -8,7 +8,9 @@ import com.corundumstudio.socketio.SocketIOServer;
 import com.corundumstudio.socketio.listener.ConnectListener;
 import com.corundumstudio.socketio.listener.DisconnectListener;
 import com.corundumstudio.socketio.listener.ExceptionListener;
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.hydroline.beacon.BeaconPlugin;
 import com.hydroline.beacon.config.PluginConfig;
@@ -54,6 +56,7 @@ public class SocketServerManager {
 
     private final BeaconPlugin plugin;
     private static final String[] RAILWAY_PAYLOAD_KEYS = new String[]{"stations", "platforms", "routes", "depots"};
+    private static final ObjectMapper ACTION_LOG_MAPPER = new ObjectMapper();
     private SocketIOServer server;
     private final Map<UUID, Long> connectionOpenAt = new ConcurrentHashMap<>();
 
@@ -80,7 +83,7 @@ public class SocketServerManager {
         server.start();
 
         plugin.getLogger().info("Socket.IO server started on port " + cfg.getPort());
-        plugin.getLogger().info("Socket.IO events registered: force_update, get_player_advancements, get_player_stats, list_online_players, get_server_time, beacon_ping, get_mtr_network_overview, get_mtr_route_detail, list_mtr_nodes_paginated, list_mtr_depots, list_mtr_fare_areas, get_mtr_station_timetable, list_mtr_stations, get_mtr_route_trains, get_mtr_depot_trains, get_mtr_railway_snapshot, get_player_mtr_logs, get_mtr_log_detail, get_player_sessions, get_player_nbt, lookup_player_identity, list_player_identities, get_players_data, execute_sql, query_mtr_entities, get_status");
+        plugin.getLogger().info("Socket.IO events registered: force_update, get_player_advancements, get_player_stats, list_online_players, get_server_time, beacon_ping, get_mtr_network_overview, get_mtr_route_detail, list_mtr_nodes_paginated, list_mtr_depots, list_mtr_fare_areas, get_mtr_station_timetable, get_mtr_station_schedule, get_mtr_all_station_schedules, list_mtr_stations, get_mtr_route_trains, get_mtr_depot_trains, get_mtr_railway_snapshot, get_player_mtr_logs, get_mtr_log_detail, get_player_sessions, get_player_nbt, lookup_player_identity, list_player_identities, get_players_data, execute_sql, query_mtr_entities, get_status");
     }
 
     public void stop() {
@@ -300,6 +303,24 @@ public class SocketServerManager {
                     }
                     forwardBeaconAction(ackSender, BeaconProviderActions.getStationTimetable(
                             data.getDimension(), data.getStationId(), data.getPlatformId()));
+                });
+
+        server.addEventListener("get_mtr_station_schedule", MtrStationScheduleRequest.class,
+                (client, data, ackSender) -> {
+                    if (!validateKey(data.getKey())) { sendError(ackSender, "INVALID_KEY"); return; }
+                    if (data.getStationId() == 0) {
+                        sendError(ackSender, "INVALID_ARGUMENT: stationId is required");
+                        return;
+                    }
+                    forwardBeaconAction(ackSender,
+                            BeaconProviderActions.getStationSchedule(data.getDimension(), data.getStationId(), data.getPlatformId()));
+                });
+
+        server.addEventListener("get_mtr_all_station_schedules", MtrAllStationSchedulesRequest.class,
+                (client, data, ackSender) -> {
+                    if (!validateKey(data.getKey())) { sendError(ackSender, "INVALID_KEY"); return; }
+                    forwardBeaconAction(ackSender,
+                            BeaconProviderActions.getAllStationSchedules(data.getDimension()));
                 });
 
         server.addEventListener("list_mtr_stations", MtrDimensionRequest.class,
@@ -980,13 +1001,8 @@ public class SocketServerManager {
             sendError(ackSender, "BEACON_PROVIDER_OFFLINE");
             return;
         }
-        client.sendAction(call).whenComplete((response, throwable) -> {
-            if (throwable != null) {
-                String msg = getRootMessage(throwable);
-                plugin.getLogger().warning("Beacon Provider action failed: " + msg);
-                sendError(ackSender, "BEACON_PROVIDER_ERROR: " + msg);
-                return;
-            }
+        try {
+            BeaconActionResponse<T> response = client.sendAction(call).get(30, TimeUnit.SECONDS);
             Map<String, Object> resp = new HashMap<>();
             resp.put("success", response.isOk());
             resp.put("result", response.getResult().name());
@@ -994,7 +1010,17 @@ public class SocketServerManager {
             resp.put("request_id", response.getRequestId());
             resp.put("payload", response.getPayload());
             ackSender.sendAckData(resp);
-        });
+        } catch (InterruptedException ex) {
+            Thread.currentThread().interrupt();
+            sendError(ackSender, "BEACON_PROVIDER_ERROR: interrupted");
+        } catch (ExecutionException ex) {
+            String msg = getRootMessage(ex.getCause() != null ? ex.getCause() : ex);
+            plugin.getLogger().warning("Beacon Provider action failed: " + msg);
+            sendError(ackSender, "BEACON_PROVIDER_ERROR: " + msg);
+        } catch (TimeoutException ex) {
+            plugin.getLogger().warning("Beacon Provider action timed out");
+            sendError(ackSender, "BEACON_PROVIDER_ERROR: timeout");
+        }
     }
 
     private void forwardRailwaySnapshotAction(AckRequest ackSender, BeaconActionCall<ObjectNode> call) {
@@ -1023,6 +1049,20 @@ public class SocketServerManager {
         } catch (TimeoutException ex) {
             plugin.getLogger().warning("Beacon Provider action timed out");
             sendError(ackSender, "BEACON_PROVIDER_ERROR: timeout");
+        }
+    }
+
+    private static String describePayload(Object payload) {
+        if (payload == null) {
+            return "null";
+        }
+        if (payload instanceof JsonNode) {
+            return ((JsonNode) payload).toString();
+        }
+        try {
+            return ACTION_LOG_MAPPER.writeValueAsString(payload);
+        } catch (JsonProcessingException e) {
+            return payload.toString();
         }
     }
 
@@ -2260,6 +2300,31 @@ public class SocketServerManager {
         public void setPlatformId(Long platformId) {
             this.platformId = platformId;
         }
+    }
+
+    public static class MtrStationScheduleRequest extends MtrDimensionRequest {
+        private long stationId;
+        private Long platformId;
+
+        public long getStationId() {
+            return stationId;
+        }
+
+        public void setStationId(long stationId) {
+            this.stationId = stationId;
+        }
+
+        public Long getPlatformId() {
+            return platformId;
+        }
+
+        public void setPlatformId(Long platformId) {
+            this.platformId = platformId;
+        }
+    }
+
+    public static class MtrAllStationSchedulesRequest extends MtrDimensionRequest {
+        // intentionally empty
     }
 
     public static class MtrDepotRequest extends MtrDimensionRequest {

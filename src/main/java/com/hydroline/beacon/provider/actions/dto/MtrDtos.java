@@ -647,6 +647,7 @@ public final class MtrDtos {
     @JsonIgnoreProperties(ignoreUnknown = true)
     public static class PlatformTimetable {
         private long platformId;
+        private String platformName;
         private List<ScheduleEntry> entries = Collections.emptyList();
 
         public long getPlatformId() {
@@ -655,6 +656,14 @@ public final class MtrDtos {
 
         public void setPlatformId(long platformId) {
             this.platformId = platformId;
+        }
+
+        public String getPlatformName() {
+            return platformName;
+        }
+
+        public void setPlatformName(String platformName) {
+            this.platformName = platformName;
         }
 
         public List<ScheduleEntry> getEntries() {
@@ -668,6 +677,11 @@ public final class MtrDtos {
 
     @JsonIgnoreProperties(ignoreUnknown = true)
     public static class ScheduleEntry {
+        private String routeName;
+        private String route;
+        private Integer color;
+        private String destination;
+        private String circular;
         private long routeId;
         private long arrivalMillis;
         private int trainCars;
@@ -680,6 +694,46 @@ public final class MtrDtos {
 
         public void setRouteId(long routeId) {
             this.routeId = routeId;
+        }
+
+        public String getRouteName() {
+            return routeName;
+        }
+
+        public void setRouteName(String routeName) {
+            this.routeName = routeName;
+        }
+
+        public String getRoute() {
+            return route;
+        }
+
+        public void setRoute(String route) {
+            this.route = route;
+        }
+
+        public Integer getColor() {
+            return color;
+        }
+
+        public void setColor(Integer color) {
+            this.color = color;
+        }
+
+        public String getDestination() {
+            return destination;
+        }
+
+        public void setDestination(String destination) {
+            this.destination = destination;
+        }
+
+        public String getCircular() {
+            return circular;
+        }
+
+        public void setCircular(String circular) {
+            this.circular = circular;
         }
 
         public long getArrivalMillis() {
