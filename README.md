@@ -12,6 +12,27 @@ In short, the Beacon Plugin is primarily responsible for maintaining the SQLite 
 and providing remote query capabilities. The drivers act as a management layer,
 handling locking and coordination internally.
 
+## Layout
+
+```
+src/main/
+├── java/com/hydroline/beacon/
+│   ├── BeaconPlugin.java          # Main plugin entrypoint
+│   ├── config/                    # Configuration handling
+│   ├── gateway/                   # Socket.IO gateway and handlers
+│   ├── listener/                  # Event listeners
+│   ├── mtr/                       # MTR-specific logic
+│   ├── provider/                  # Data providers
+│   ├── socket/                    # Socket.IO server management
+│   ├── storage/                   # Database operations
+│   ├── task/                      # Scheduled tasks
+│   ├── util/                      # Utility functions
+│   └── world/                     # World data handling
+└── resources/
+    ├── config.yml                 # Default configuration
+    └── plugin.yml                 # Plugin metadata
+```
+
 ## Configuration
 
 The plugin configuration is located at `plugins/Hydroline-Beacon/config.yml` (source: `src/main/resources/config.yml`).
@@ -43,28 +64,7 @@ pnpm install
 node test-socketio.js
 ```
 
-## Project Structure
-
-```
-src/main/
-├── java/com/hydroline/beacon/
-│   ├── BeaconPlugin.java          # Main plugin entrypoint
-│   ├── config/                    # Configuration handling
-│   ├── gateway/                   # Socket.IO gateway and handlers
-│   ├── listener/                  # Event listeners
-│   ├── mtr/                       # MTR-specific logic
-│   ├── provider/                  # Data providers
-│   ├── socket/                    # Socket.IO server management
-│   ├── storage/                   # Database operations
-│   ├── task/                      # Scheduled tasks
-│   ├── util/                      # Utility functions
-│   └── world/                     # World data handling
-└── resources/
-    ├── config.yml                 # Default configuration
-    └── plugin.yml                 # Plugin metadata
-```
-
-## Configuration
+## Deployment
 
 1. Build the plugin: `./gradlew build`
 2. Copy the JAR from `build/libs/` to your Bukkit server's `plugins/` directory
