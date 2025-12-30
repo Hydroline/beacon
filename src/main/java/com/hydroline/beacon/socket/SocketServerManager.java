@@ -2056,6 +2056,7 @@ public class SocketServerManager {
             limit = MAX_MTR_QUERY_LIMIT;
         }
         int offset = request.getOffset() != null ? Math.max(0, request.getOffset()) : 0;
+        boolean requestAll = Boolean.TRUE.equals(request.getAll());
 
         String orderBy = request.getOrderBy();
         if (orderBy == null || !category.getOrderableColumns().contains(orderBy)) {
@@ -2079,9 +2080,10 @@ public class SocketServerManager {
         sql.append(" FROM ").append(category.getTableName()).append(" WHERE 1=1");
         List<Object> params = new ArrayList<>();
 
-        if (request.getDimensionContext() != null && !request.getDimensionContext().trim().isEmpty()) {
+        String dimensionContext = normalizeMtrDimensionContext(request.getDimensionContext());
+        if (dimensionContext != null) {
             sql.append(" AND dimension_context = ?");
-            params.add(request.getDimensionContext().trim());
+            params.add(dimensionContext);
         }
 
         Map<String, Object> filters = request.getFilters();
@@ -2097,9 +2099,11 @@ public class SocketServerManager {
         }
 
         sql.append(" ORDER BY ").append(orderBy).append(' ').append(orderDir);
-        sql.append(" LIMIT ? OFFSET ?");
-        params.add(limit);
-        params.add(offset);
+        if (!requestAll) {
+            sql.append(" LIMIT ? OFFSET ?");
+            params.add(limit);
+            params.add(offset);
+        }
 
         List<Map<String, Object>> rows = new ArrayList<>();
         try (Connection conn = plugin.getDatabaseManager().getConnection();
@@ -2118,7 +2122,7 @@ public class SocketServerManager {
                     row.put("last_updated", rs.getLong("last_updated"));
                     if (includePayload) {
                         String payload = rs.getString("payload");
-                        row.put("payload", payload);
+                        row.put("payload", parseJsonOrString(payload));
                     }
                     rows.add(row);
                 }
@@ -2127,11 +2131,62 @@ public class SocketServerManager {
 
         Map<String, Object> result = new HashMap<>();
         result.put("rows", rows);
-        result.put("limit", limit);
-        result.put("offset", offset);
-        result.put("truncated", rows.size() >= limit);
+        result.put("limit", requestAll ? rows.size() : limit);
+        result.put("offset", requestAll ? 0 : offset);
+        result.put("truncated", requestAll ? false : rows.size() >= limit);
+        result.put("all", requestAll);
         result.put("category", category.getKey());
         return result;
+    }
+
+    private String normalizeMtrDimensionContext(String raw) {
+        if (raw == null) {
+            return null;
+        }
+        String value = raw.trim();
+        if (value.isEmpty()) {
+            return null;
+        }
+        // Stored dimension_context for world/mtr scans is "mtr/<namespace>/<dimension>".
+        // Allow callers to pass:
+        // - "mtr/minecraft/overworld" (native)
+        // - "world/mtr/minecraft/overworld" (world-relative path)
+        // - "minecraft:overworld" (Minecraft dimension id)
+        // - "minecraft/overworld" (namespace/dimension)
+        if (value.startsWith("mtr/")) {
+            return value;
+        }
+        if (value.startsWith("world/mtr/")) {
+            return value.substring("world/".length());
+        }
+        if (value.indexOf(':') > 0 && value.indexOf('/') < 0) {
+            String[] parts = value.split(":", 2);
+            String namespace = parts[0].trim();
+            String dimension = parts[1].trim();
+            if (!namespace.isEmpty() && !dimension.isEmpty()) {
+                return "mtr/" + namespace + "/" + dimension;
+            }
+        }
+        int firstSlash = value.indexOf('/');
+        if (firstSlash > 0 && value.lastIndexOf('/') == firstSlash) {
+            return "mtr/" + value;
+        }
+        return value;
+    }
+
+    private Object parseJsonOrString(String raw) {
+        if (raw == null) {
+            return null;
+        }
+        String trimmed = raw.trim();
+        if (trimmed.isEmpty()) {
+            return "";
+        }
+        try {
+            return ACTION_LOG_MAPPER.readValue(trimmed, Object.class);
+        } catch (IOException ignored) {
+            return raw;
+        }
     }
 
     private Map<String, Object> executeSelectSql(String sql, Integer maxRows) throws SQLException {
@@ -2598,6 +2653,7 @@ public class SocketServerManager {
         private String orderBy;
         private String orderDir;
         private Boolean includePayload;
+        private Boolean all;
 
         public MtrQueryRequest() {}
 
@@ -2617,6 +2673,8 @@ public class SocketServerManager {
         public void setOrderDir(String orderDir) { this.orderDir = orderDir; }
         public Boolean getIncludePayload() { return includePayload; }
         public void setIncludePayload(Boolean includePayload) { this.includePayload = includePayload; }
+        public Boolean getAll() { return all; }
+        public void setAll(Boolean all) { this.all = all; }
     }
 
     public static class PlayerBalanceRequest implements AuthPayload {

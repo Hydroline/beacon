@@ -453,6 +453,20 @@ async function runMtrTests({
   );
   await writeJson(outDir, "mtr_railway_snapshot.json", railway);
 
+  const mtrEntitiesAllPayload = {
+    key,
+    category: "stations",
+    all: true,
+    ...(dimension ? { dimensionContext: dimension } : {}),
+  };
+  const mtrEntitiesAll = await emitWithAck(
+    socket,
+    "query_mtr_entities",
+    mtrEntitiesAllPayload,
+    "query_mtr_entities(all)"
+  );
+  await writeJson(outDir, "mtr_entities_stations_all.json", mtrEntitiesAll);
+
   const snapshots = Array.isArray(railway?.snapshots) ? railway.snapshots : [];
   if (snapshots.length === 0) {
     console.warn(
