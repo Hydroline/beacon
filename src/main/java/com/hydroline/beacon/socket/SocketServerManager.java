@@ -38,6 +38,7 @@ import java.sql.ResultSetMetaData;
 import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.Base64;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -87,10 +88,38 @@ public class SocketServerManager {
     }
 
     public void stop() {
-        if (server != null) {
-            server.stop();
-            server = null;
-            plugin.getLogger().info("Socket.IO server stopped.");
+        SocketIOServer currentServer = server;
+        if (currentServer == null) {
+            return;
+        }
+        server = null;
+
+        Thread stopThread = new Thread(() -> {
+            disconnectClients(currentServer);
+            try {
+                currentServer.stop();
+                plugin.getLogger().info("Socket.IO server stopped.");
+            } catch (Exception e) {
+                plugin.getLogger().warning("Socket.IO server stop failed: " + e.getMessage());
+            }
+        }, "hydroline-beacon-socket-stop");
+        stopThread.setDaemon(true);
+        stopThread.start();
+    }
+
+    private void disconnectClients(SocketIOServer targetServer) {
+        if (targetServer == null) {
+            return;
+        }
+        Collection<SocketIOClient> clients = targetServer.getAllClients();
+        if (clients == null || clients.isEmpty()) {
+            return;
+        }
+        for (SocketIOClient client : new ArrayList<>(clients)) {
+            try {
+                client.disconnect();
+            } catch (Exception ignored) {
+            }
         }
     }
 
