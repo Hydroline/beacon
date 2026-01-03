@@ -10,6 +10,7 @@ import com.hydroline.beacon.task.MtrLogsScanner;
 import com.hydroline.beacon.task.MtrWorldScanner;
 import com.hydroline.beacon.task.NbtIdentityScanner;
 import org.bukkit.Bukkit;
+import org.bukkit.ChatColor;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandExecutor;
 import org.bukkit.command.CommandSender;
@@ -346,11 +347,15 @@ public final class BeaconCommand implements CommandExecutor {
     }
 
     private void send(CommandSender sender, String locale, String key, Object... params) {
-        sender.sendMessage(translations.get(locale, key, params));
+        sender.sendMessage(colorize(translations.get(locale, key, params)));
     }
 
     private void sendAsync(CommandSender sender, String locale, String key, Object... params) {
         Bukkit.getScheduler().runTask(plugin, () -> send(sender, locale, key, params));
+    }
+
+    private String colorize(String message) {
+        return ChatColor.translateAlternateColorCodes('&', message);
     }
 
     private String resolveLocale(CommandSender sender) {
