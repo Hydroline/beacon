@@ -62,6 +62,12 @@ public class ConfigManager {
             cfg.set("mtr_world_scan_batch_size", mtrWorldScanBatchSize);
         }
 
+        String defaultLanguage = cfg.getString("default_language", "zh_cn");
+        if (defaultLanguage == null || defaultLanguage.trim().isEmpty()) {
+            defaultLanguage = "zh_cn";
+            cfg.set("default_language", defaultLanguage);
+        }
+
         plugin.saveConfig();
         currentConfig = new PluginConfig(
                 port,
@@ -70,7 +76,8 @@ public class ConfigManager {
                 version,
                 nbtCacheTtlMinutes,
                 mtrWorldScanEnabled,
-                (int) mtrWorldScanBatchSize
+                (int) mtrWorldScanBatchSize,
+                defaultLanguage
         );
     }
 

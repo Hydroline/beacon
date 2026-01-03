@@ -11,6 +11,7 @@ public class PluginConfig {
     private final long nbtCacheTtlMinutes;
     private final boolean mtrWorldScanEnabled;
     private final int mtrWorldScanBatchSize;
+    private final String defaultLanguage;
 
     public PluginConfig(int port,
                         String key,
@@ -18,7 +19,8 @@ public class PluginConfig {
                         int version,
                         long nbtCacheTtlMinutes,
                         boolean mtrWorldScanEnabled,
-                        int mtrWorldScanBatchSize) {
+                        int mtrWorldScanBatchSize,
+                        String defaultLanguage) {
         this.port = port;
         this.key = key;
         this.intervalTimeTicks = intervalTimeTicks;
@@ -26,6 +28,7 @@ public class PluginConfig {
         this.nbtCacheTtlMinutes = nbtCacheTtlMinutes;
         this.mtrWorldScanEnabled = mtrWorldScanEnabled;
         this.mtrWorldScanBatchSize = mtrWorldScanBatchSize;
+        this.defaultLanguage = defaultLanguage;
     }
 
     public static PluginConfig fromConfig(FileConfiguration config) {
@@ -39,6 +42,10 @@ public class PluginConfig {
         if (mtrWorldScanBatchSize <= 0) {
             mtrWorldScanBatchSize = 16;
         }
+        String defaultLanguage = config.getString("default_language", "zh_cn");
+        if (defaultLanguage == null || defaultLanguage.trim().isEmpty()) {
+            defaultLanguage = "zh_cn";
+        }
         return new PluginConfig(
                 port,
                 key,
@@ -46,7 +53,8 @@ public class PluginConfig {
                 version,
                 nbtCacheTtlMinutes,
                 mtrWorldScanEnabled,
-                mtrWorldScanBatchSize
+                mtrWorldScanBatchSize,
+                defaultLanguage
         );
     }
 
@@ -76,5 +84,9 @@ public class PluginConfig {
 
     public int getMtrWorldScanBatchSize() {
         return mtrWorldScanBatchSize;
+    }
+
+    public String getDefaultLanguage() {
+        return defaultLanguage;
     }
 }

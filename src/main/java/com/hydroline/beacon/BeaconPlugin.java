@@ -1,5 +1,6 @@
 package com.hydroline.beacon;
 
+import com.hydroline.beacon.command.BeaconCommand;
 import com.hydroline.beacon.config.ConfigManager;
 import com.hydroline.beacon.config.PluginConfig;
 import com.hydroline.beacon.listener.PlayerSessionListener;
@@ -10,6 +11,7 @@ import com.hydroline.beacon.socket.SocketServerManager;
 import com.hydroline.beacon.storage.DatabaseManager;
 import com.hydroline.beacon.task.ScanScheduler;
 import com.hydroline.beacon.world.WorldFileAccess;
+import org.bukkit.command.PluginCommand;
 import org.bukkit.Bukkit;
 import org.bukkit.plugin.java.JavaPlugin;
 import org.bukkit.scheduler.BukkitRunnable;
@@ -31,6 +33,10 @@ public class BeaconPlugin extends JavaPlugin {
     public void onEnable() {
         this.configManager = new ConfigManager(this);
         this.configManager.load();
+        PluginCommand beaconCommand = getCommand("beacon");
+        if (beaconCommand != null) {
+            beaconCommand.setExecutor(new BeaconCommand(this));
+        }
 
         PluginConfig cfg = configManager.getCurrentConfig();
         getLogger().info("Hydroline Beacon enabled with port=" + cfg.getPort()
@@ -110,6 +116,10 @@ public class BeaconPlugin extends JavaPlugin {
 
     public WorldFileAccess getWorldFileAccess() {
         return worldFileAccess;
+    }
+
+    public SocketServerManager getSocketServerManager() {
+        return socketServerManager;
     }
 
     public BeaconProviderClient getBeaconProviderClient() {

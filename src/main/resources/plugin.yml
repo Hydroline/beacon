@@ -1,6 +1,16 @@
 name: Beacon
-version: 0.1.10
+version: 0.1.11
 main: com.hydroline.beacon.BeaconPlugin
 api-version: 1.16
 author: Hydroline
 description: A starter Bukkit plugin template.
+commands:
+  beacon:
+    description: Manage hydroline beacon operations.
+    usage: /beacon help
+    permission: hydroline.beacon.admin
+    permission-message: You do not have permission to use Beacon commands.
+permissions:
+  hydroline.beacon.admin:
+    description: Access Hydroline Beacon admin commands.
+    default: op

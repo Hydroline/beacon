@@ -59,6 +59,8 @@ public final class BeaconProviderClient {
     private volatile ScheduledFuture<?> handshakeTimeoutFuture;
     private volatile ScheduledFuture<?> heartbeatFuture;
     private volatile long reconnectDelayMs = 1000L;
+    private volatile String peerVersion = "unknown";
+    private volatile long lastConnectedAtMillis;
 
     public BeaconProviderClient(BeaconPlugin plugin) {
         this.plugin = Objects.requireNonNull(plugin, "plugin");
@@ -90,6 +92,23 @@ public final class BeaconProviderClient {
 
     public boolean isStarted() {
         return started && session != null && socket != null;
+    }
+
+    public StatusSnapshot getStatusSnapshot() {
+        boolean gatewayEnabled = gatewayConfig != null && gatewayConfig.isEnabled();
+        boolean connected = isStarted();
+        String connectionId = session != null ? session.connectionId() : null;
+        long heartbeat = session != null ? session.heartbeatIntervalSeconds() : -1L;
+        return new StatusSnapshot(
+                gatewayEnabled,
+                connected,
+                connectionId,
+                heartbeat,
+                lastConnectedAtMillis,
+                reconnectDelayMs,
+                pendingRequests.size(),
+                peerVersion
+        );
     }
 
     public <T> CompletableFuture<BeaconActionResponse<T>> sendAction(BeaconActionCall<T> call) {
@@ -215,8 +234,10 @@ public final class BeaconProviderClient {
         String connectionId = body.path("connectionId").asText(null);
         long heartbeatInterval = body.path("heartbeatIntervalSeconds").asLong(30L);
         String modVersion = body.path("modVersion").asText("unknown");
+        this.peerVersion = modVersion;
         this.session = new GatewaySession(connectionId, heartbeatInterval);
         this.reconnectDelayMs = 1000L;
+        this.lastConnectedAtMillis = System.currentTimeMillis();
         if (handshakeFuture != null) {
             handshakeFuture.complete(null);
         }
@@ -440,6 +461,67 @@ public final class BeaconProviderClient {
 
         public long heartbeatIntervalSeconds() {
             return heartbeatIntervalSeconds;
+        }
+    }
+
+    public static final class StatusSnapshot {
+        private final boolean gatewayEnabled;
+        private final boolean connected;
+        private final String connectionId;
+        private final long heartbeatSeconds;
+        private final long lastConnectedAtMillis;
+        private final long reconnectDelayMillis;
+        private final int pendingRequests;
+        private final String modVersion;
+
+        private StatusSnapshot(boolean gatewayEnabled,
+                               boolean connected,
+                               String connectionId,
+                               long heartbeatSeconds,
+                               long lastConnectedAtMillis,
+                               long reconnectDelayMillis,
+                               int pendingRequests,
+                               String modVersion) {
+            this.gatewayEnabled = gatewayEnabled;
+            this.connected = connected;
+            this.connectionId = connectionId;
+            this.heartbeatSeconds = heartbeatSeconds;
+            this.lastConnectedAtMillis = lastConnectedAtMillis;
+            this.reconnectDelayMillis = reconnectDelayMillis;
+            this.pendingRequests = pendingRequests;
+            this.modVersion = modVersion;
+        }
+
+        public boolean gatewayEnabled() {
+            return gatewayEnabled;
+        }
+
+        public boolean isConnected() {
+            return connected;
+        }
+
+        public String getConnectionId() {
+            return connectionId;
+        }
+
+        public long getHeartbeatSeconds() {
+            return heartbeatSeconds;
+        }
+
+        public long getLastConnectedAtMillis() {
+            return lastConnectedAtMillis;
+        }
+
+        public long getReconnectDelayMillis() {
+            return reconnectDelayMillis;
+        }
+
+        public int getPendingRequests() {
+            return pendingRequests;
+        }
+
+        public String getModVersion() {
+            return modVersion;
         }
     }
 

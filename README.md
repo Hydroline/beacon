@@ -1,6 +1,6 @@
 # beacon
 
-> This project is tightly coupled with the Beacon Provider.
+> [中文](README_zh.md)。This project is tightly coupled with the Beacon Provider.
 
 Beacon Plugin is a Bukkit/Spigot telemetry plugin that exposes Minecraft server information via Socket.IO to backend services or other consumers. It collects and aggregates data from players, world events, and MTR, Create mod logs, storing them in SQLite for querying.
 
@@ -46,6 +46,36 @@ Key configuration options:
 - `mtr_world_scan_batch_size`: Maximum files per scan batch (default: 16)
 
 Also, the plugin automatically scans the Beacon Provider configuration files in `./config`.
+
+## Configuration example (defaults)
+
+When you first run the plugin, it will create `plugins/Hydroline-Beacon/config.yml` populated with defaults. Below is the default setting shipped with `src/main/resources/config.yml`:
+
+| Field                       | Description                                               | Default |
+| --------------------------- | --------------------------------------------------------- | ------- |
+| `port`                      | Socket.IO server port                                     | `48080` |
+| `key`                       | 64-byte secret for `/beacon` authentication               | `""`    |
+| `interval_time`             | Task scan interval in ticks (1 tick = 0.05s)              | `200`   |
+| `mtr_world_scan_enabled`    | Enable scanning of MTR world structures                   | `true`  |
+| `mtr_world_scan_batch_size` | Files per batch during world scan                         | `16`    |
+| `nbt_cache_ttl_minutes`     | TTL (minutes) for cached `get_player_nbt` JSON            | `10`    |
+| `default_language`          | Default `/beacon` command language when no locale matched | `zh_cn` |
+| `version`                   | Configuration version number (kept in sync with plugin)   | `1`     |
+
+## Command usage
+
+Beacon commands default to simplified Chinese (zh_cn). When a CommandSender runs `/beacon`, the plugin reads the player's or console locale, loads the most specific translation resource that exists, and falls back to `lang/messages_en_us.properties` if no match is found. All commands require `hydroline.beacon.admin`.
+
+| Command                      | Description                                                                                                                                       |
+| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `/beacon list`               | Lists connected Socket.IO clients with details such as connection ID, IP/port, transport, and user agent.                                         |
+| `/beacon provider status`    | Shows whether the Beacon Provider gateway is enabled, connected, heartbeat interval, pending requests, reconnect delay, and provider mod version. |
+| `/beacon sync nbt`           | Forces a manual refresh of the `player_nbt_cache` table by scanning playerdata files.                                                             |
+| `/beacon sync scans`         | Manually runs the advancement/stat scan, MTR log scan, and MTR world scan to keep data fresh.                                                     |
+| `/beacon query <SELECT ...>` | Executes a read-only SQL query (single `SELECT`, no semicolons) against the SQLite database, returning up to five rows.                           |
+| `/beacon stats`              | Reports counts for key tables plus the most recent recorded timestamps.                                                                           |
+| `/beacon info`               | Displays current configuration (port, scan interval, plugin version, NBT TTL) and whether the Provider gateway is enabled.                        |
+| `/beacon help`               | Prints the command usage synopsis (same as `/beacon`).                                                                                            |
 
 ## Building
 

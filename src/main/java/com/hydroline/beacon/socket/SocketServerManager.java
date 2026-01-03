@@ -106,6 +106,26 @@ public class SocketServerManager {
         shutdown.start();
     }
 
+    public boolean isServerRunning() {
+        return server != null;
+    }
+
+    public List<String> getConnectedClientSummaries() {
+        SocketIOServer current = server;
+        if (current == null) {
+            return Collections.emptyList();
+        }
+        Collection<SocketIOClient> clients = current.getAllClients();
+        if (clients == null || clients.isEmpty()) {
+            return Collections.emptyList();
+        }
+        List<String> summaries = new ArrayList<>(clients.size());
+        for (SocketIOClient client : clients) {
+            summaries.add(formatClientInfo(client));
+        }
+        return summaries;
+    }
+
     private void stopBlocking(SocketIOServer currentServer) {
         try {
             currentServer.stop();
