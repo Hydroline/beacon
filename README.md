@@ -1,6 +1,6 @@
 # beacon
 
-> [中文](README_zh.md)。This project is tightly coupled with the Beacon Provider.
+> [中文](README_zh.md). This project is tightly coupled with the Beacon Provider.
 
 Beacon Plugin is a Bukkit/Spigot telemetry plugin that exposes Minecraft server information via Socket.IO to backend services or other consumers. It collects and aggregates data from players, world events, and MTR, Create mod logs, storing them in SQLite for querying.
 
