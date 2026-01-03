@@ -54,7 +54,9 @@ public final class TranslationManager {
                 return new Properties();
             }
             Properties props = new Properties();
-            props.load(stream);
+            try (java.io.Reader reader = new java.io.InputStreamReader(stream, java.nio.charset.StandardCharsets.UTF_8)) {
+                props.load(reader);
+            }
             return props;
         } catch (IOException e) {
             plugin.getLogger().warning("Failed to load language bundle " + resourcePath + ": " + e.getMessage());
