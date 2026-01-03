@@ -52,14 +52,17 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.concurrent.Callable;
 
 public class SocketServerManager {
 
     private final BeaconPlugin plugin;
     private static final String[] RAILWAY_PAYLOAD_KEYS = new String[]{"stations", "platforms", "routes", "depots"};
     private static final ObjectMapper ACTION_LOG_MAPPER = new ObjectMapper();
+    private static final long BUKKIT_SYNC_TIMEOUT_MS = 3000L;
     private SocketIOServer server;
     private final Map<UUID, Long> connectionOpenAt = new ConcurrentHashMap<>();
+    private volatile boolean stopRequested;
 
     public SocketServerManager(BeaconPlugin plugin) {
         this.plugin = plugin;
@@ -93,8 +96,17 @@ public class SocketServerManager {
             return;
         }
         server = null;
+        stopRequested = true;
 
-        disconnectClients(currentServer);
+        Thread shutdown = new Thread(() -> {
+            disconnectClients(currentServer);
+            stopBlocking(currentServer);
+        }, "beacon-socketio-stop");
+        shutdown.setDaemon(true);
+        shutdown.start();
+    }
+
+    private void stopBlocking(SocketIOServer currentServer) {
         try {
             currentServer.stop();
             plugin.getLogger().info("Socket.IO server stopped.");
@@ -222,16 +234,24 @@ public class SocketServerManager {
                         sendError(ackSender, "INVALID_KEY");
                         return;
                     }
+                    if (isShuttingDown()) {
+                        sendError(ackSender, "SERVER_SHUTTING_DOWN");
+                        return;
+                    }
                     try {
-                        Future<List<Map<String, Object>>> future =
-                                Bukkit.getScheduler().callSyncMethod(plugin, this::collectOnlinePlayers);
-                        List<Map<String, Object>> players = future.get();
+                        List<Map<String, Object>> players = callBukkitSyncWithTimeout(this::collectOnlinePlayers);
                         Map<String, Object> resp = new HashMap<>();
                         resp.put("success", true);
                         resp.put("players", players);
                         ackSender.sendAckData(resp);
-                    } catch (InterruptedException | ExecutionException e) {
-                        sendError(ackSender, "INTERNAL_ERROR: " + e.getMessage());
+                    } catch (TimeoutException e) {
+                        sendError(ackSender, "TIMEOUT");
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                        sendError(ackSender, "INTERNAL_ERROR: interrupted");
+                    } catch (ExecutionException e) {
+                        Throwable cause = e.getCause();
+                        sendError(ackSender, "INTERNAL_ERROR: " + (cause != null ? cause.getMessage() : e.getMessage()));
                     }
                 });
 
@@ -241,16 +261,24 @@ public class SocketServerManager {
                         sendError(ackSender, "INVALID_KEY");
                         return;
                     }
+                    if (isShuttingDown()) {
+                        sendError(ackSender, "SERVER_SHUTTING_DOWN");
+                        return;
+                    }
                     try {
-                        Future<Map<String, Object>> future =
-                                Bukkit.getScheduler().callSyncMethod(plugin, this::collectServerTime);
-                        Map<String, Object> info = future.get();
+                        Map<String, Object> info = callBukkitSyncWithTimeout(this::collectServerTime);
                         Map<String, Object> resp = new HashMap<>();
                         resp.put("success", true);
                         resp.putAll(info);
                         ackSender.sendAckData(resp);
-                    } catch (InterruptedException | ExecutionException e) {
-                        sendError(ackSender, "INTERNAL_ERROR: " + e.getMessage());
+                    } catch (TimeoutException e) {
+                        sendError(ackSender, "TIMEOUT");
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                        sendError(ackSender, "INTERNAL_ERROR: interrupted");
+                    } catch (ExecutionException e) {
+                        Throwable cause = e.getCause();
+                        sendError(ackSender, "INTERNAL_ERROR: " + (cause != null ? cause.getMessage() : e.getMessage()));
                     }
                 });
 
@@ -579,11 +607,13 @@ public class SocketServerManager {
                         sendError(ackSender, "INVALID_KEY");
                         return;
                     }
+                    if (isShuttingDown()) {
+                        sendError(ackSender, "SERVER_SHUTTING_DOWN");
+                        return;
+                    }
                     try {
                         // Collect Bukkit server basics on main thread
-                        Future<Map<String, Object>> futureBasics =
-                                Bukkit.getScheduler().callSyncMethod(plugin, this::collectServerBasics);
-                        Map<String, Object> basics = futureBasics.get();
+                        Map<String, Object> basics = callBukkitSyncWithTimeout(this::collectServerBasics);
 
                         // Load DB totals
                         Map<String, Long> totals = loadDataTotals();
@@ -597,8 +627,14 @@ public class SocketServerManager {
                         resp.putAll(basics);
                         resp.putAll(totals);
                         ackSender.sendAckData(resp);
-                    } catch (InterruptedException | ExecutionException e) {
-                        sendError(ackSender, "INTERNAL_ERROR: " + e.getMessage());
+                    } catch (TimeoutException e) {
+                        sendError(ackSender, "TIMEOUT");
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                        sendError(ackSender, "INTERNAL_ERROR: interrupted");
+                    } catch (ExecutionException e) {
+                        Throwable cause = e.getCause();
+                        sendError(ackSender, "INTERNAL_ERROR: " + (cause != null ? cause.getMessage() : e.getMessage()));
                     } catch (SQLException e) {
                         sendError(ackSender, "DB_ERROR: " + e.getMessage());
                     }
@@ -609,6 +645,10 @@ public class SocketServerManager {
                 (client, data, ackSender) -> {
                     if (!validateKey(data.getKey())) {
                         sendError(ackSender, "INVALID_KEY");
+                        return;
+                    }
+                    if (isShuttingDown()) {
+                        sendError(ackSender, "SERVER_SHUTTING_DOWN");
                         return;
                     }
                     try {
@@ -663,9 +703,8 @@ public class SocketServerManager {
                                     throw new IllegalArgumentException("playerNames or playerUuids required when includeBalance is true");
                                 }
                             }
-                            Future<List<Map<String, Object>>> future = Bukkit.getScheduler().callSyncMethod(plugin, () ->
+                            List<Map<String, Object>> balances = callBukkitSyncWithTimeout(() ->
                                     collectBalancesMainScoreboard(includeBalanceAll ? null : balanceNames, includeBalanceAll));
-                            List<Map<String, Object>> balances = future.get();
                             resp.put("balances", balances);
                         }
 
@@ -685,6 +724,8 @@ public class SocketServerManager {
                         sendError(ackSender, "INVALID_ARGUMENT: " + e.getMessage());
                     } catch (SQLException e) {
                         sendError(ackSender, "DB_ERROR: " + e.getMessage());
+                    } catch (TimeoutException e) {
+                        sendError(ackSender, "TIMEOUT");
                     } catch (InterruptedException e) {
                         Thread.currentThread().interrupt();
                         sendError(ackSender, "INTERNAL_ERROR: interrupted");
@@ -736,15 +777,19 @@ public class SocketServerManager {
                         sendError(ackSender, "INVALID_KEY");
                         return;
                     }
+                    if (isShuttingDown()) {
+                        sendError(ackSender, "SERVER_SHUTTING_DOWN");
+                        return;
+                    }
                     try {
-                        Future<Long> future = Bukkit.getScheduler().callSyncMethod(plugin, () ->
-                                getPlayerBalanceOnMainScoreboard(data.getPlayerName()));
-                        Long value = future.get();
+                        Long value = callBukkitSyncWithTimeout(() -> getPlayerBalanceOnMainScoreboard(data.getPlayerName()));
                         Map<String, Object> resp = new HashMap<>();
                         resp.put("success", true);
                         resp.put("player", data.getPlayerName());
                         resp.put("balance", value);
                         ackSender.sendAckData(resp);
+                    } catch (TimeoutException e) {
+                        sendError(ackSender, "TIMEOUT");
                     } catch (InterruptedException e) {
                         Thread.currentThread().interrupt();
                         sendError(ackSender, "INTERNAL_ERROR: interrupted");
@@ -766,15 +811,20 @@ public class SocketServerManager {
                         sendError(ackSender, "INVALID_KEY");
                         return;
                     }
+                    if (isShuttingDown()) {
+                        sendError(ackSender, "SERVER_SHUTTING_DOWN");
+                        return;
+                    }
                     try {
-                        Future<Long> future = Bukkit.getScheduler().callSyncMethod(plugin, () ->
+                        Long value = callBukkitSyncWithTimeout(() ->
                                 setPlayerBalanceOnMainScoreboard(data.getPlayerName(), data.getAmount()));
-                        Long value = future.get();
                         Map<String, Object> resp = new HashMap<>();
                         resp.put("success", true);
                         resp.put("player", data.getPlayerName());
                         resp.put("balance", value);
                         ackSender.sendAckData(resp);
+                    } catch (TimeoutException e) {
+                        sendError(ackSender, "TIMEOUT");
                     } catch (InterruptedException e) {
                         Thread.currentThread().interrupt();
                         sendError(ackSender, "INTERNAL_ERROR: interrupted");
@@ -796,15 +846,20 @@ public class SocketServerManager {
                         sendError(ackSender, "INVALID_KEY");
                         return;
                     }
+                    if (isShuttingDown()) {
+                        sendError(ackSender, "SERVER_SHUTTING_DOWN");
+                        return;
+                    }
                     try {
-                        Future<Long> future = Bukkit.getScheduler().callSyncMethod(plugin, () ->
+                        Long value = callBukkitSyncWithTimeout(() ->
                                 addPlayerBalanceOnMainScoreboard(data.getPlayerName(), data.getAmount()));
-                        Long value = future.get();
                         Map<String, Object> resp = new HashMap<>();
                         resp.put("success", true);
                         resp.put("player", data.getPlayerName());
                         resp.put("balance", value);
                         ackSender.sendAckData(resp);
+                    } catch (TimeoutException e) {
+                        sendError(ackSender, "TIMEOUT");
                     } catch (InterruptedException e) {
                         Thread.currentThread().interrupt();
                         sendError(ackSender, "INTERNAL_ERROR: interrupted");
@@ -819,6 +874,26 @@ public class SocketServerManager {
                         sendError(ackSender, "INVALID_ARGUMENT: " + e.getMessage());
                     }
                 });
+    }
+
+    private boolean isShuttingDown() {
+        return stopRequested || plugin.isShuttingDown();
+    }
+
+    private <T> T callBukkitSyncWithTimeout(Callable<T> callable)
+            throws InterruptedException, ExecutionException, TimeoutException {
+        Future<T> future;
+        try {
+            future = Bukkit.getScheduler().callSyncMethod(plugin, callable);
+        } catch (RuntimeException e) {
+            throw new ExecutionException(e);
+        }
+        try {
+            return future.get(BUKKIT_SYNC_TIMEOUT_MS, TimeUnit.MILLISECONDS);
+        } catch (TimeoutException e) {
+            future.cancel(true);
+            throw e;
+        }
     }
 
     private long getPlayerBalanceOnMainScoreboard(String playerName) {

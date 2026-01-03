@@ -15,6 +15,7 @@ import org.bukkit.plugin.java.JavaPlugin;
 import org.bukkit.scheduler.BukkitRunnable;
 
 import java.sql.SQLException;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 public class BeaconPlugin extends JavaPlugin {
 
@@ -24,6 +25,7 @@ public class BeaconPlugin extends JavaPlugin {
     private WorldFileAccess worldFileAccess;
     private SocketServerManager socketServerManager;
     private BeaconProviderClient beaconProviderClient;
+    private final AtomicBoolean shuttingDown = new AtomicBoolean(false);
 
     @Override
     public void onEnable() {
@@ -72,6 +74,7 @@ public class BeaconPlugin extends JavaPlugin {
 
     @Override
     public void onDisable() {
+        shuttingDown.set(true);
         if (this.scanScheduler != null) {
             this.scanScheduler.stop();
         }
@@ -91,6 +94,10 @@ public class BeaconPlugin extends JavaPlugin {
             getLogger().warning("Failed to backfill sessions on shutdown: " + e.getMessage());
         }
         getLogger().info("Hydroline Beacon disabled!");
+    }
+
+    public boolean isShuttingDown() {
+        return shuttingDown.get();
     }
 
     public ConfigManager getConfigManager() {
