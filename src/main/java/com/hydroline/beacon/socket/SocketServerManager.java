@@ -40,6 +40,7 @@ import java.util.ArrayList;
 import java.util.Base64;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -1196,18 +1197,32 @@ public class SocketServerManager {
             Map<String, Object> snapshot = new LinkedHashMap<>();
             snapshot.put("dimension", snapshotNode.path("dimension").asText(null));
             snapshot.put("length", snapshotNode.has("length") ? snapshotNode.get("length").asLong() : null);
-            snapshot.put("payload", decodeRailwayPayload(snapshotNode.path("payload")));
+            snapshot.put("payload", decodeRailwayPayload(snapshotNode));
             snapshots.add(snapshot);
         }
         return snapshots;
     }
 
-    private Map<String, Object> decodeRailwayPayload(JsonNode payloadNode) {
-        if (payloadNode == null || !payloadNode.isTextual()) {
+    private Map<String, Object> decodeRailwayPayload(JsonNode snapshotNode) {
+        if (snapshotNode == null || snapshotNode.isNull()) {
             return Collections.emptyMap();
         }
-        String encoded = payloadNode.asText();
-        if (encoded.isEmpty()) {
+        String dimension = snapshotNode.path("dimension").asText("unknown");
+        String encoded = null;
+        JsonNode payloadChunks = snapshotNode.path("payloadChunks");
+        if (payloadChunks.isObject()) {
+            encoded = reassemblePayloadFromChunks(payloadChunks);
+            if (isNullOrEmpty(encoded)) {
+                plugin.getLogger().warning("Beacon Provider chunked payload for '" + dimension + "' is empty or invalid.");
+            }
+        }
+        if (isNullOrEmpty(encoded)) {
+            JsonNode payloadNode = snapshotNode.path("payload");
+            if (payloadNode.isTextual()) {
+                encoded = payloadNode.asText();
+            }
+        }
+        if (isNullOrEmpty(encoded)) {
             return Collections.emptyMap();
         }
         try {
@@ -1218,6 +1233,34 @@ public class SocketServerManager {
             plugin.getLogger().warning("Failed to decode MTR snapshot from provider: " + ex.getMessage());
             return Collections.emptyMap();
         }
+    }
+
+    private String reassemblePayloadFromChunks(JsonNode payloadChunks) {
+        String encoding = payloadChunks.path("encoding").asText(null);
+        if (encoding == null || !"base64".equalsIgnoreCase(encoding)) {
+            if (encoding != null) {
+                plugin.getLogger().warning("Unsupported chunk encoding: " + encoding);
+            }
+            return null;
+        }
+        JsonNode chunks = payloadChunks.path("chunks");
+        if (!chunks.isArray() || chunks.size() == 0) {
+            return null;
+        }
+        List<JsonNode> orderedChunks = new ArrayList<>();
+        for (JsonNode chunk : chunks) {
+            orderedChunks.add(chunk);
+        }
+        orderedChunks.sort(Comparator.comparingInt(chunk -> chunk.path("index").asInt(0)));
+        StringBuilder builder = new StringBuilder();
+        for (JsonNode chunk : orderedChunks) {
+            JsonNode dataNode = chunk.path("data");
+            if (!dataNode.isTextual()) {
+                continue;
+            }
+            builder.append(dataNode.asText());
+        }
+        return builder.length() > 0 ? builder.toString() : null;
     }
 
     private Map<String, Object> filterRailwayPayload(Object decoded) {
